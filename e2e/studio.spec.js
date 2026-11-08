@@ -46,7 +46,7 @@ test('navigation mobile et administration non configurée sans débordement',asy
 test('administration : compte autorisé, statistiques, paramétrage et échappement',async({page})=>{
   const calls=await mockSupabase(page,{orders:[{id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',customer_email:'<img src=x onerror=alert(1)>',qr_type:'url',status:'paid',amount_dzd:850,payment_mode:'test',created_at:'2026-11-08T12:00:00Z'}]});
   await page.goto('/admin/');await expect(page.locator('#email')).toHaveCount(0);await page.locator('#password').fill('examplepassword');await page.locator('#login-button').click();
-  await expect(page.getByRole('heading',{name:/Votre activité, en un regard/})).toBeVisible();await expect(page.locator('#stat-paid')).toHaveText('1');await expect(page.locator('#recent-rows img')).toHaveCount(0);
+  await expect(page.getByRole('heading',{name:/Votre activité, en un regard/})).toBeVisible();await expect(page.locator('#admin-label')).toHaveText('Administrateur');await expect(page.locator('#stat-paid')).toHaveText('1');await expect(page.locator('#recent-rows img')).toHaveCount(0);
   await page.locator('.sidebar [data-view=settings]').click();await page.locator('#price').fill('1250');await page.locator('#announcement').fill('Bonjour');await page.locator('#save-button').click();await expect(page.getByText('Paramètres enregistrés.')).toBeVisible();
   const patch=calls.find(c=>c.url==='/rest/v1/qr_studio_settings'&&c.method==='PATCH');expect(JSON.parse(patch.body)).toMatchObject({price_dzd:1250,announcement:'Bonjour'});
 });
