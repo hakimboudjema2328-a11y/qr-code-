@@ -41,3 +41,20 @@ test('purchased SVG styles scan back to the intended content', async ({ page }) 
     expect(jsQR(new Uint8ClampedArray(image.data), image.width, image.height)?.data, `${dots}/${corner}`).toBe(expected);
   }
 });
+
+test('password recovery sends a link to the expected site route', async ({ page }) => {
+  let recoveryUrl = '';
+  await page.route('**/api/config', route => route.fulfill({ json: { supabase: { url: 'https://mock.supabase.co', anonKey: 'public-example' }, priceDzd: null, salesEnabled: false } }));
+  await page.route('https://mock.supabase.co/**', async route => {
+    const req = route.request();
+    if (req.url().includes('/auth/v1/recover')) recoveryUrl = req.url();
+    await route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Content-Type': 'application/json' }, body: '{}' });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Se connecter/ }).first().click();
+  await page.getByRole('button', { name: 'Mot de passe oublié ?' }).click();
+  await page.getByLabel('Adresse e-mail').fill('demo@example.com');
+  await page.getByRole('button', { name: 'Envoyer le lien' }).click();
+  await expect(page.getByText(/Si cette adresse possède un compte/)).toBeVisible();
+  expect(new URL(recoveryUrl).searchParams.get('redirect_to')).toContain('/reinitialiser-mot-de-passe');
+});
