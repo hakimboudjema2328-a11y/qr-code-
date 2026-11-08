@@ -35,7 +35,7 @@ Par rapport au dépôt de référence, les protections faibles ne sont **pas** c
    ```
 
    Remplacer l’adresse ; vérifier qu’une ligne est insérée. Aucun mot de passe administrateur n’est prédéfini.
-4. Dans Authentication → URL Configuration, choisir l’URL HTTPS du site et autoriser la redirection `https://VOTRE-SITE/?recovery=1` pour la récupération de mot de passe. Configurer un service SMTP adapté avant une mise en production.
+4. Dans Authentication → URL Configuration, choisir l’URL HTTPS du site et autoriser la redirection `https://VOTRE-SITE/?recovery=1` pour la récupération de mot de passe. Configurer un service SMTP adapté avant une mise en production : l’expéditeur Supabase par défaut est limité et ne permet pas les confirmations e-mail pour tous les clients.
 5. Récupérer **uniquement l’URL du projet et la clé anon/publishable publique** pour les sites et l’APK. Ne jamais y placer `service_role`, clés Chargily, mots de passe ou jetons GitHub/Cloudflare.
 
 ## 2. Paiement Chargily (d’abord en mode test)
@@ -52,9 +52,9 @@ Dans les **secrets des Edge Functions Supabase**, définir :
 Supabase fournit automatiquement aux fonctions `SUPABASE_URL`, `SUPABASE_ANON_KEY` et `SUPABASE_SERVICE_ROLE_KEY`. Ne pas placer ces secrets dans GitHub Variables, le site ou l’APK. Déployer les fonctions depuis ce répertoire avec la CLI Supabase connectée au bon projet :
 
 ```bash
-supabase functions deploy qr-checkout --project-ref VOTRE_PROJECT_REF
-supabase functions deploy qr-order --project-ref VOTRE_PROJECT_REF
-supabase functions deploy chargily-webhook --project-ref VOTRE_PROJECT_REF --no-verify-jwt
+npx supabase@3.0.0 functions deploy qr-checkout --remote=VOTRE_PROJECT_REF --use-api --yes
+npx supabase@3.0.0 functions deploy qr-order --remote=VOTRE_PROJECT_REF --use-api --yes
+npx supabase@3.0.0 functions deploy chargily-webhook --remote=VOTRE_PROJECT_REF --use-api --no-verify-jwt --yes
 ```
 
 Seul le webhook désactive la vérification JWT de la passerelle, car Chargily n’a pas de compte utilisateur Supabase. **Sa signature est vérifiée par le code.** Les deux fonctions clientes exigent un JWT et revérifient l’utilisateur. L’URL webhook est fournie automatiquement à Chargily : `https://VOTRE-PROJET.supabase.co/functions/v1/chargily-webhook`.

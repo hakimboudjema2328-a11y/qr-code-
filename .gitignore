@@ -12,3 +12,5 @@ android/**/build/
 *.jks
 *.apk
 *.aab
+
+supabase/.temp/
