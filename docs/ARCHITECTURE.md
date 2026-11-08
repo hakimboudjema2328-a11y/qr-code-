@@ -8,3 +8,5 @@
 - Aucune page ne reçoit de clé service-role ou Chargily. Le montant est relu côté serveur. Un retour navigateur ne confirme pas le paiement. Les modes test/réel sont strictement séparés.
 - L’aperçu n’encode qu’un exemple ; l’export du contenu réel est produit côté serveur après paiement confirmé. Il n’empêche évidemment pas un utilisateur de créer un QR ailleurs.
 - Par rapport à KARIDZ : pas de RLS permissive, pas de mot de passe par défaut et pas d’accès universel `file://`. Les notifications et les trois applications propres à la location de voitures ne sont pas répliquées car hors du projet QR.
+
+- La connexion administrateur demande uniquement le mot de passe : l’adresse de récupération reste dans le secret `ADMIN_EMAIL` de Supabase. La fonction vérifie Supabase Auth et le rôle ; un verrou limite les tentatives incorrectes.

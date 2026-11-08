@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const adminId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const encode=x=>Buffer.from(JSON.stringify(x)).toString('base64url');
-const token=encode({alg:'HS256',typ:'JWT'})+'.'+encode({sub:adminId,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})+'.signature';
+const token=encode({alg:'HS256',typ:'JWT'})+'.'+encode({sub:adminId,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})+'.c2lnbmF0dXJl';
 const session={access_token:token,refresh_token:'mock-refresh-token',expires_in:3600,token_type:'bearer',user:{id:adminId,aud:'authenticated',role:'authenticated',email:'admin@example.com',email_confirmed_at:'2025-01-01T00:00:00Z'}};
 async function mockSupabase(page,options={}){
   const calls=[];
@@ -16,6 +16,7 @@ async function mockSupabase(page,options={}){
     if(method==='OPTIONS')return route.fulfill({status:204,headers,body:''});
     let body={};
     if(u.pathname==='/auth/v1/token')body=session;
+    else if(u.pathname==='/auth/v1/user')body=session.user;
     else if(u.pathname==='/auth/v1/recover')body={};
     else if(u.pathname==='/auth/v1/logout')body={};
     else if(u.pathname==='/rest/v1/rpc/qr_is_admin')body=true;
@@ -23,6 +24,7 @@ async function mockSupabase(page,options={}){
     else if(u.pathname==='/rest/v1/qr_studio_settings'&&method==='GET')body={price_dzd:850,checkout_enabled:true,payment_mode:'test',announcement:'',support_email:''};
     else if(u.pathname==='/rest/v1/qr_studio_settings'&&method==='PATCH')body=[{id:1}];
     else if(u.pathname==='/rest/v1/qr_studio_orders')body=options.orders||[];
+    else if(u.pathname==='/functions/v1/qr-admin-auth')body={access_token:session.access_token,refresh_token:session.refresh_token};
     else if(u.pathname==='/functions/v1/qr-checkout')body={id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',checkoutUrl:'https://pay.chargily.dz/test/demo'};
     else if(u.pathname==='/functions/v1/qr-order')body={verification:'unavailable',order:{status:'pending'}};
     else return route.fulfill({status:404,headers,body:'{}'});
@@ -43,7 +45,7 @@ test('navigation mobile et administration non configurée sans débordement',asy
 });
 test('administration : compte autorisé, statistiques, paramétrage et échappement',async({page})=>{
   const calls=await mockSupabase(page,{orders:[{id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',customer_email:'<img src=x onerror=alert(1)>',qr_type:'url',status:'paid',amount_dzd:850,payment_mode:'test',created_at:'2026-11-08T12:00:00Z'}]});
-  await page.goto('/admin/');await page.locator('#email').fill('admin@example.com');await page.locator('#password').fill('examplepassword');await page.locator('#login-button').click();
+  await page.goto('/admin/');await expect(page.locator('#email')).toHaveCount(0);await page.locator('#password').fill('examplepassword');await page.locator('#login-button').click();
   await expect(page.getByRole('heading',{name:/Votre activité, en un regard/})).toBeVisible();await expect(page.locator('#stat-paid')).toHaveText('1');await expect(page.locator('#recent-rows img')).toHaveCount(0);
   await page.locator('.sidebar [data-view=settings]').click();await page.locator('#price').fill('1250');await page.locator('#announcement').fill('Bonjour');await page.locator('#save-button').click();await expect(page.getByText('Paramètres enregistrés.')).toBeVisible();
   const patch=calls.find(c=>c.url==='/rest/v1/qr_studio_settings'&&c.method==='PATCH');expect(JSON.parse(patch.body)).toMatchObject({price_dzd:1250,announcement:'Bonjour'});
@@ -61,4 +63,11 @@ test('les neuf styles SVG se décodent vers le contenu payé',async({page})=>{
  const script=`import { DEFAULT_STYLE,renderSvg } from './supabase/functions/_shared/qr.js'; const all=[];for(const dots of ['square','rounded','dots'])for(const corner of ['square','rounded','circle'])all.push(renderSvg({type:'url',content:{url:'https://example.com/scan-me'},style:{...DEFAULT_STYLE,dots,corner}}));console.log(JSON.stringify(all));`;
  const svgList=JSON.parse(execFileSync(path.join(process.cwd(),'node_modules/.bin/deno'),['eval',script],{encoding:'utf8'}));await page.goto('/');await page.addScriptTag({path:require.resolve('jsqr/dist/jsQR.js')});
  for(const svg of svgList){const decoded=await page.evaluate(async s=>{const blob=new Blob([s],{type:'image/svg+xml'}),url=URL.createObjectURL(blob);try{const img=new Image();await new Promise((ok,no)=>{img.onload=ok;img.onerror=no;img.src=url});const c=document.createElement('canvas');c.width=800;c.height=800;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,800,800);ctx.drawImage(img,0,0,800,800);const pixels=ctx.getImageData(0,0,800,800);return window.jsQR(pixels.data,800,800)?.data||''}finally{URL.revokeObjectURL(url)}},svg);expect(decoded).toBe('https://example.com/scan-me')}
+});
+
+
+test('la récupération admin demande l’e-mail uniquement lorsqu’elle est nécessaire',async({page})=>{
+ await mockSupabase(page);await page.goto('/admin/');await expect(page.locator('#email')).toHaveCount(0);
+ const href=await page.locator('#recovery-link').getAttribute('href');expect(href).toContain('/?forgot=1');
+ await page.goto('/?forgot=1');await expect(page.getByRole('heading',{name:'Mot de passe oublié ?'})).toBeVisible();await expect(page.locator('#auth-email')).toBeVisible();
 });

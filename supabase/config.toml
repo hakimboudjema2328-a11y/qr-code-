@@ -6,3 +6,6 @@ verify_jwt = true
 verify_jwt = true
 [functions.chargily-webhook]
 verify_jwt = false
+# Login public limité ; le mot de passe est vérifié par Supabase Auth, puis le rôle admin est vérifié.
+[functions.qr-admin-auth]
+verify_jwt = false

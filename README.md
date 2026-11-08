@@ -12,6 +12,7 @@ admin-app/web/                      administration HTML/CSS/JS + manifest + SW
 supabase/schema.sql                 tables, RLS et autorisations administrateur
 supabase/functions/qr-checkout/     création de paiement Chargily
 supabase/functions/qr-order/        vérification et export après paiement
+supabase/functions/qr-admin-auth/   connexion admin par mot de passe seul
 supabase/functions/chargily-webhook/ webhook public à signature obligatoire
 android/admin/                      application native WebView Java
 android/prepare_assets.sh           copie de l’administration dans l’APK
@@ -35,8 +36,9 @@ Par rapport au dépôt de référence, les protections faibles ne sont **pas** c
    ```
 
    Remplacer l’adresse ; vérifier qu’une ligne est insérée. Aucun mot de passe administrateur n’est prédéfini.
-4. Dans Authentication → URL Configuration, choisir l’URL HTTPS du site et autoriser la redirection `https://VOTRE-SITE/?recovery=1` pour la récupération de mot de passe. Configurer un service SMTP adapté avant une mise en production : l’expéditeur Supabase par défaut est limité et ne permet pas les confirmations e-mail pour tous les clients.
-5. Récupérer **uniquement l’URL du projet et la clé anon/publishable publique** pour les sites et l’APK. Ne jamais y placer `service_role`, clés Chargily, mots de passe ou jetons GitHub/Cloudflare.
+4. L’administration demande uniquement le mot de passe. Définir `ADMIN_EMAIL` comme secret Supabase Edge, avec l’adresse du compte administrateur ; elle est utilisée côté serveur et pour la récupération, et n’est pas intégrée à l’APK. La vérification est assurée par Supabase Auth et un limiteur de tentatives côté serveur.
+5. Dans Authentication → URL Configuration, choisir l’URL HTTPS du site et autoriser la redirection `https://VOTRE-SITE/?recovery=1` pour la récupération de mot de passe. Configurer un service SMTP adapté avant une mise en production : l’expéditeur Supabase par défaut est limité et ne permet pas les confirmations e-mail pour tous les clients.
+6. Récupérer **uniquement l’URL du projet et la clé anon/publishable publique** pour les sites et l’APK. Ne jamais y placer `service_role`, clés Chargily, mots de passe ou jetons GitHub/Cloudflare.
 
 ## 2. Paiement Chargily (d’abord en mode test)
 
@@ -54,10 +56,11 @@ Supabase fournit automatiquement aux fonctions `SUPABASE_URL`, `SUPABASE_ANON_KE
 ```bash
 npx supabase@3.0.0 functions deploy qr-checkout --remote=VOTRE_PROJECT_REF --use-api --yes
 npx supabase@3.0.0 functions deploy qr-order --remote=VOTRE_PROJECT_REF --use-api --yes
+npx supabase@3.0.0 functions deploy qr-admin-auth --remote=VOTRE_PROJECT_REF --use-api --yes
 npx supabase@3.0.0 functions deploy chargily-webhook --remote=VOTRE_PROJECT_REF --use-api --no-verify-jwt --yes
 ```
 
-Seul le webhook désactive la vérification JWT de la passerelle, car Chargily n’a pas de compte utilisateur Supabase. **Sa signature est vérifiée par le code.** Les deux fonctions clientes exigent un JWT et revérifient l’utilisateur. L’URL webhook est fournie automatiquement à Chargily : `https://VOTRE-PROJET.supabase.co/functions/v1/chargily-webhook`.
+Le webhook et la connexion administrateur désactivent la vérification JWT de la passerelle, car ils sont appelés avant authentification. **Le webhook exige une signature valide ; la connexion admin applique une limitation de tentatives, vérifie le mot de passe auprès de Supabase Auth puis contrôle le rôle administrateur.** Les fonctions checkout et export exigent un JWT et revérifient l’utilisateur. L’URL webhook est fournie automatiquement à Chargily : `https://VOTRE-PROJET.supabase.co/functions/v1/chargily-webhook`.
 
 Dans l’administration, définir le tarif convenu, sélectionner le mode déclaré (qui doit correspondre à `CHARGILY_MODE` côté serveur) puis activer les ventes. Une incohérence entre les deux désactive la création de paiement. Tester inscription, confirmation e-mail, paiement test, webhook, actualisation et téléchargements. Passer en `live` uniquement après validation du compte Chargily et des essais. Les commandes de test ne doivent pas être considérées comme des ventes réelles.
 
@@ -75,7 +78,7 @@ Le workflow `cloudflare-pages.yml` est volontairement inactif tant que la variab
 
 ## 4. APK via GitHub Actions
 
-Le workflow `build-apk.yml` vérifie les pages, copie l’intégralité de `admin-app/web` dans les assets, injecte la **configuration publique**, puis construit et vérifie l’APK. Ajouter dans les GitHub Variables du dépôt QR `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `PUBLIC_SITE_URL` ; relancer l’action après modification. Sans ces valeurs l’APK affiche une page de configuration, mais l’administration ne peut pas se connecter. Télécharger l’artefact `qr-studio-admin` depuis Actions.
+Le workflow `build-apk.yml` vérifie les pages, copie l’intégralité de `admin-app/web` dans les assets, injecte la **configuration publique**, puis construit et vérifie l’APK. Ajouter dans les GitHub Variables du dépôt QR `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `PUBLIC_SITE_URL` ; relancer l’action après modification. Sans ces valeurs l’APK affiche une page de configuration, mais l’administration ne peut pas se connecter. Télécharger l’artefact `qr-studio-admin-1` (le suffixe correspond à la tentative) depuis Actions.
 
 Par défaut, seul un **APK debug de test** est créé (Android 7+, non destiné à une publication Play Store). Pour générer aussi une version release et un AAB signés, ajouter les secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` dans le dépôt QR. La signature release doit être conservée de manière sûre. Deux APK signés par des clés différentes peuvent nécessiter la désinstallation de l’ancien avant installation. Tester sur de vrais téléphones avant distribution. Le navigateur externe ouvre les liens hors de l’APK ; l’export CSV utilise le sélecteur de documents Android.
 
