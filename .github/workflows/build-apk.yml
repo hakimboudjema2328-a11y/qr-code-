@@ -1,0 +1,86 @@
+name: Construire l’APK administrateur
+on:
+  push:
+    branches: [main, karidz-reconstruction]
+    paths:
+      - 'android/**'
+      - 'admin-app/web/**'
+      - 'scripts/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Vérifier les pages statiques
+        run: python3 scripts/check-html.py
+  build:
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Installer Android 35
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.7' }
+      - name: Embarquer les fichiers web et la configuration publique
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL || 'https://qr-studio-2328.pages.dev' }}
+        run: bash android/prepare_assets.sh
+      - name: Construire l’APK de test
+        run: gradle --project-dir android :admin:assembleDebug --stacktrace
+      - name: Vérifier si la signature de production est configurée
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/qr-release.keystore"
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo 'Signature de production absente : APK de test uniquement.'
+          fi
+      - name: Construire APK et AAB de production signés
+        if: steps.signing.outputs.available == 'true'
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/qr-release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle --project-dir android :admin:assembleRelease :admin:bundleRelease --stacktrace
+      - name: Vérifier le contenu et la signature
+        run: |
+          APK=android/admin/build/outputs/apk/debug/admin-debug.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep -q 'assets/www/index.html'
+          unzip -l "$APK" | grep -q 'assets/www/supabase-config.js'
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$APK"
+          mkdir -p deliverables
+          cp "$APK" deliverables/QR-Studio-Admin-debug.apk
+          if [ -f android/admin/build/outputs/apk/release/admin-release.apk ]; then
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify android/admin/build/outputs/apk/release/admin-release.apk
+            cp android/admin/build/outputs/apk/release/admin-release.apk deliverables/QR-Studio-Admin-release.apk
+            cp android/admin/build/outputs/bundle/release/admin-release.aab deliverables/QR-Studio-Admin-release.aab
+          fi
+          sha256sum deliverables/* > deliverables/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qr-studio-admin
+          path: deliverables/
+          retention-days: 14

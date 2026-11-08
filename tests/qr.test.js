@@ -1,8 +1,8 @@
-import test from 'node:test';
+const test = (name, fn) => Deno.test(name, fn);
 import assert from 'node:assert/strict';
 import { createHmac, randomBytes } from 'node:crypto';
-import { DEFAULT_STYLE, exampleSnapshot, hasGoodContrast, normalizeSnapshot, renderSvg } from '../shared/qr.js';
-import { decryptSnapshot, encryptSnapshot, verifyChargilySignature } from '../server/crypto.js';
+import { DEFAULT_STYLE, exampleSnapshot, hasGoodContrast, normalizeSnapshot, renderSvg } from '../supabase/functions/_shared/qr.js';
+import { decryptSnapshot, encryptSnapshot, verifyChargilySignature } from '../supabase/functions/_shared/crypto.js';
 
 const draft = (type, content, style = DEFAULT_STYLE) => ({ type, content, style });
 test('Wi-Fi escaping and standards-compliant terminator', () => {
@@ -42,4 +42,11 @@ test('Chargily signature covers the exact raw request bytes', async () => {
   assert.equal(await verifyChargilySignature(key, raw, signature), true);
   assert.equal(await verifyChargilySignature(key, new TextEncoder().encode('{"type":"checkout.paid"}'), signature), false);
   assert.equal(await verifyChargilySignature(key, raw, 'wrong'), false);
+});
+
+
+test('un réseau Wi-Fi ouvert efface tout ancien mot de passe', () => {
+  const result = normalizeSnapshot(draft('wifi', { wifiName: 'Réseau', wifiPassword: 'secret-ancien', wifiSecurity: 'nopass', hidden: false }));
+  assert.equal(result.content.wifiPassword, '');
+  assert.ok(!result.payload.includes('secret-ancien'));
 });

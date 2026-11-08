@@ -1,0 +1,8 @@
+# Les appels clients exigent un JWT côté passerelle ET une vérification du
+# compte côté fonction. Le webhook est public mais authentifié par signature.
+[functions.qr-checkout]
+verify_jwt = true
+[functions.qr-order]
+verify_jwt = true
+[functions.chargily-webhook]
+verify_jwt = false

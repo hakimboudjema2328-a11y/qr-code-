@@ -1,19 +1,14 @@
-name: Tests du projet
-on:
-  push:
-  pull_request:
-  workflow_dispatch:
+name: Vérifications QR Studio
+on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 jobs:
-  web:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
+        with: { node-version: '20', cache: npm }
       - run: npm ci
       - run: npm run check
       - run: npx playwright install --with-deps chromium

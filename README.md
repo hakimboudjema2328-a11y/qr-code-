@@ -1,104 +1,98 @@
-# QR Studio
+# QR Studio — QR codes personnalisés
 
-Créateur de QR codes personnalisés en français : React / Vite, Cloudflare Pages Functions, Supabase et Chargily Pay. Ce projet poursuit le dépôt initial `qr-code-`.
+Site public + espace administrateur + Supabase + APK Android WebView. L’organisation reprend la méthode du projet KARIDZ : **pages HTML autonomes**, PWA, base Supabase partagée, fichiers web embarqués dans l’APK et construction Android par GitHub Actions. Il n’y a pas de build web React/Vite.
 
-- Site de démonstration Cloudflare : **https://qr-studio-2328.pages.dev**
-- Administration : **https://qr-studio-2328.pages.dev/admin**
-- Application Android : dossier `android/`, construite par le workflow GitHub Actions « Construire l’APK administrateur ».
+> **État : configuration nécessaire.** Sans projet Supabase, compte administrateur, secrets Chargily, clé de chiffrement et tarif, les comptes et les ventes restent indisponibles. Aucun paiement réel n’est supposé testé. Le paiement par création dans le code est une hypothèse à confirmer ; le tarif et le modèle commercial restent à définir.
 
-> **État actuel : démonstration, pas une boutique active.** Le tarif n’a pas été fixé et les accès Supabase / Chargily n’ont pas été configurés. Les ventes, les connexions et les téléchargements payants restent indisponibles tant que la configuration ci-dessous et les essais ne sont pas terminés. Aucun vrai paiement n’a été testé. Le modèle d’achat à l’unité est une hypothèse provisoire, à confirmer avant activation.
+## Arborescence
 
-## Fonctionnalités
+```text
+site-public/web/                    site client HTML/CSS/JS + manifest + SW
+admin-app/web/                      administration HTML/CSS/JS + manifest + SW
+supabase/schema.sql                 tables, RLS et autorisations administrateur
+supabase/functions/qr-checkout/     création de paiement Chargily
+supabase/functions/qr-order/        vérification et export après paiement
+supabase/functions/chargily-webhook/ webhook public à signature obligatoire
+android/admin/                      application native WebView Java
+android/prepare_assets.sh           copie de l’administration dans l’APK
+scripts/prepare-web.sh              préparation Cloudflare : site + /admin/
+.github/workflows/build-apk.yml      vérifications, APK GitHub, AAB si signé
+tests/ et e2e/                      tests simulés, UI et décodage des QR
+```
 
-- Éditeur adaptatif : lien, texte, WhatsApp, Wi-Fi, e-mail, téléphone, SMS et vCard ; couleurs, formes, logo et légende.
-- L’aperçu gratuit utilise un **contenu d’exemple**, pas les données personnelles du client. Une commande fige une création ; le QR correspondant est téléchargeable en SVG ou PNG après confirmation du paiement.
-- Comptes et historique de commandes via Supabase Auth ; panneau administrateur protégé côté serveur par l’UUID du compte admin. L’admin peut régler le prix, activer / désactiver les commandes, gérer un message et une adresse de support, et consulter les 200 dernières commandes (les totaux affichés ne sont pas un historique complet).
-- Checkout Chargily Pay v2 préparé en DZD. Le prix vient de la base, pas du navigateur ; la validation utilise la signature HMAC du webhook **et** une requête serveur à Chargily. Le simple retour sur le site ne suffit jamais à marquer une commande payée. Les frais sont configurés côté marchand.
-- Contenu des commandes chiffré avec AES-256-GCM avant stockage. Les rôles `anon` et `authenticated` ne peuvent pas accéder directement aux tables ; la clé `service_role` reste côté Cloudflare.
-- Les paiements de test et les paiements réels sont séparés par mode et les exports de test ne sont pas accessibles en mode réel.
+Par rapport au dépôt de référence, les protections faibles ne sont **pas** copiées : pas de mot de passe codé en dur, pas de RLS ouverte, pas de clés secrètes dans les pages. L’APK embarque bien les fichiers comme KARIDZ mais les sert via `WebViewAssetLoader` (`https://appassets.androidplatform.net/...`) plutôt que `file://`, afin de désactiver l’accès général aux fichiers. Le site et l’administration sont réunis sous une origine Cloudflare : `/` et `/admin/`.
 
-Les QR sont **statiques** : leur contenu ne peut pas être modifié après achat et ils ne fournissent pas de statistiques de scans. Tester chaque QR avant impression. Toute personne qui scanne un QR Wi-Fi peut en voir les identifiants.
+## 1. Supabase et administrateur
 
-## 1. Sécurité des clés
+1. Choisir ou créer un projet Supabase dédié. Ne pas utiliser un autre projet sans vérifier sa destination et ses données.
+2. SQL Editor : exécuter `supabase/schema.sql`. Vérifier les RLS et les privilèges si ces tables existaient déjà. `qr_studio_settings` ne contient que des informations publiques ; commandes et rôles sont protégés. Seules les fonctions serveur ont accès aux brouillons chiffrés.
+3. Activer l’authentification e-mail, créer un utilisateur et confirmer son adresse. Dans SQL Editor, attribuer explicitement ce compte :
 
-Les anciens jetons GitHub, Supabase et Cloudflare communiqués dans la conversation doivent être **révoqués puis remplacés**. Ne collez pas de nouvelles clés dans une conversation et ne les commitez jamais. Utilisez uniquement les zones chiffrées de Cloudflare et les secrets GitHub. Le jeton de gestion Supabase `sbp_…` n’est **pas** la clé `service_role` du projet.
+   ```sql
+   insert into public.qr_studio_admins(user_id)
+   select id from auth.users where email = 'votre-adresse@example.com'
+   on conflict (user_id) do nothing;
+   ```
 
-## 2. Préparer Supabase
+   Remplacer l’adresse ; vérifier qu’une ligne est insérée. Aucun mot de passe administrateur n’est prédéfini.
+4. Dans Authentication → URL Configuration, choisir l’URL HTTPS du site et autoriser la redirection `https://VOTRE-SITE/?recovery=1` pour la récupération de mot de passe. Configurer un service SMTP adapté avant une mise en production.
+5. Récupérer **uniquement l’URL du projet et la clé anon/publishable publique** pour les sites et l’APK. Ne jamais y placer `service_role`, clés Chargily, mots de passe ou jetons GitHub/Cloudflare.
 
-1. Choisissez un projet Supabase approprié (de préférence distinct pour les essais et la production). Faites une sauvegarde si la base contient déjà des données.
-2. Dans **SQL Editor**, exécutez une seule fois [`supabase/migrations/001_qr_studio.sql`](supabase/migrations/001_qr_studio.sql). Le script crée uniquement les tables `qr_studio_settings` et `qr_studio_orders`, active la RLS et retire l’accès direct aux rôles navigateur.
-3. Dans **Authentication → Users**, créez le compte administrateur avec une adresse e-mail confirmée et un mot de passe fort. Copiez son **UUID** pour `ADMIN_USER_ID`. Un compte inscrit normalement n’est pas automatiquement administrateur.
-4. Dans la configuration d’authentification, définissez l’URL du site et les URLs de redirection autorisées vers `https://qr-studio-2328.pages.dev` et `https://qr-studio-2328.pages.dev/reinitialiser-mot-de-passe`. Activez la confirmation des adresses e-mail et configurez un service d’e-mail adapté à la production.
-5. Récupérez l’URL du projet, la clé publique `anon` / `publishable`, et la **clé JWT historique `service_role`** dans Supabase. Ne confondez pas cette dernière avec le jeton de gestion `sbp_…`. La clé service doit rester secrète.
+## 2. Paiement Chargily (d’abord en mode test)
 
-Pour les clés Supabase modernes `sb_secret_…`, l’authentification REST peut différer : le backend actuel attend la clé JWT historique `service_role` ; ne la remplacez pas par un `sb_secret_…` sans adapter et tester le backend.
+La création de session utilise le prix stocké côté serveur, et non un montant transmis par le navigateur. Les commandes sont limitées à l’utilisateur connecté. Les brouillons (dont un éventuel mot de passe Wi-Fi) sont chiffrés par AES-GCM ; l’export n’est autorisé qu’après confirmation serveur du paiement. Le webhook Chargily vérifie HMAC-SHA256 sur le corps brut puis revérifie la session auprès de Chargily. Les environnements `test` et `live` restent séparés.
 
-## 3. Configurer Cloudflare Pages
+Dans les **secrets des Edge Functions Supabase**, définir :
 
-Le projet Cloudflare **`qr-studio-2328`** a été créé en mode **Direct Upload**. `PUBLIC_SITE_URL` et `CHARGILY_MODE=test` sont prévus pour l’environnement de production Pages. Dans Cloudflare → **Workers & Pages → qr-studio-2328 → Settings → Variables and Secrets**, vérifiez ces valeurs et ajoutez les suivantes à l’environnement souhaité :
+- `PUBLIC_SITE_URL` : origine HTTPS du site, sans chemin final.
+- `CHARGILY_MODE` : `test` ou `live` ; commencer par `test`.
+- `CHARGILY_SECRET_KEY` : clé Chargily correspondant exactement à ce mode.
+- `ORDER_ENCRYPTION_KEY` : 32 octets aléatoires encodés en base64 (`openssl rand -base64 32`). **Conserver cette clé en lieu sûr** : sa perte rend les anciennes créations indéchiffrables ; la rotation exige une migration contrôlée.
 
-| Nom | Valeur | Nature |
-| --- | --- | --- |
-| `PUBLIC_SITE_URL` | `https://qr-studio-2328.pages.dev` (origine HTTPS, sans chemin ni slash final) | Variable |
-| `SUPABASE_URL` | URL HTTPS du projet Supabase | Variable |
-| `SUPABASE_ANON_KEY` | clé publique `anon` / `publishable` | Variable publique |
-| `SUPABASE_SERVICE_ROLE_KEY` | clé JWT historique `service_role` du projet | **Secret chiffré** |
-| `ADMIN_USER_ID` | UUID exact de l’utilisateur administrateur confirmé | Variable |
-| `ORDER_ENCRYPTION_KEY` | 32 octets aléatoires encodés en base64 | **Secret chiffré** |
-| `CHARGILY_MODE` | `test` pour les essais, puis `live` uniquement après validation | Variable |
-| `CHARGILY_SECRET_KEY` | clé secrète Chargily correspondant au mode choisi | **Secret chiffré** |
+Supabase fournit automatiquement aux fonctions `SUPABASE_URL`, `SUPABASE_ANON_KEY` et `SUPABASE_SERVICE_ROLE_KEY`. Ne pas placer ces secrets dans GitHub Variables, le site ou l’APK. Déployer les fonctions depuis ce répertoire avec la CLI Supabase connectée au bon projet :
 
-Générez `ORDER_ENCRYPTION_KEY` sur votre machine avec `openssl rand -base64 32`. Conservez-en une sauvegarde dans un gestionnaire de secrets. **Changer ou perdre cette clé sans migration rend les anciennes créations indéchiffrables.** Ce n’est pas l’un des jetons d’accès exposés à révoquer.
+```bash
+supabase functions deploy qr-checkout --project-ref VOTRE_PROJECT_REF
+supabase functions deploy qr-order --project-ref VOTRE_PROJECT_REF
+supabase functions deploy chargily-webhook --project-ref VOTRE_PROJECT_REF --no-verify-jwt
+```
 
-Redéployez après modification des variables / secrets. La politique CSP dans `public/_headers` autorise les domaines `*.supabase.co` ; si votre projet utilise un domaine Supabase personnalisé, ajoutez explicitement ce domaine à `connect-src` avant déploiement. Si vous changez de domaine, mettez à jour `PUBLIC_SITE_URL`, les URLs Supabase et la variable GitHub `ADMIN_SITE_URL`, puis reconstruisez l’APK.
+Seul le webhook désactive la vérification JWT de la passerelle, car Chargily n’a pas de compte utilisateur Supabase. **Sa signature est vérifiée par le code.** Les deux fonctions clientes exigent un JWT et revérifient l’utilisateur. L’URL webhook est fournie automatiquement à Chargily : `https://VOTRE-PROJET.supabase.co/functions/v1/chargily-webhook`.
 
-## 4. Préparer Chargily et ouvrir les ventes
+Dans l’administration, définir le tarif convenu, sélectionner le mode déclaré (qui doit correspondre à `CHARGILY_MODE` côté serveur) puis activer les ventes. Une incohérence entre les deux désactive la création de paiement. Tester inscription, confirmation e-mail, paiement test, webhook, actualisation et téléchargements. Passer en `live` uniquement après validation du compte Chargily et des essais. Les commandes de test ne doivent pas être considérées comme des ventes réelles.
 
-1. Créez / vérifiez le compte marchand Chargily. Utilisez d’abord la clé **test** et `CHARGILY_MODE=test`. Chargily demande la vérification du compte pour le mode réel.
-2. Le webhook est envoyé à `https://qr-studio-2328.pages.dev/api/webhook` ; renseignez également cette adresse dans le tableau de bord Chargily si nécessaire. La signature est contrôlée sur le corps brut.
-3. Connectez-vous à `/admin` avec le compte admin, définissez le prix en **dinars entiers** et l’adresse de support, puis activez les commandes. Le tarif exact et le modèle commercial restent à confirmer avec le propriétaire.
-4. Testez de bout en bout en mode test : création d’un compte confirmé, paiement réussi, paiement annulé, webhook invalide, retour sans webhook, téléchargement PNG / SVG, réouverture depuis « Mes créations » et contrôle du QR avec plusieurs téléphones. Les tests automatisés du dépôt utilisent des services simulés : ils ne remplacent pas ce test Chargily réel.
-5. Complétez les mentions légales, CGV, politique de remboursement, confidentialité, durée de conservation et procédure de suppression ; configurez la limitation de débit / WAF, la supervision et les sauvegardes. Ensuite seulement, mettez une clé réelle et `CHARGILY_MODE=live`, redéployez et vérifiez une transaction réelle de faible montant selon vos règles métier.
+## 3. Cloudflare Pages
 
-Références : [création de checkout Chargily](https://dev.chargily.com/pay-v2/api-reference/checkouts/create), [webhooks Chargily](https://dev.chargily.com/pay-v2/webhooks), [variables et secrets Cloudflare Pages](https://developers.cloudflare.com/pages/functions/bindings/).
+Remplir les **valeurs publiques** dans l’environnement de construction ou les GitHub Variables : `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `PUBLIC_SITE_URL`. Les fichiers `supabase-config.js` du dépôt sont des modèles vides ; le script écrit la configuration dans une copie, jamais un secret. Un domaine Supabase personnalisé est ajouté automatiquement à la CSP de la copie.
 
-## 5. Construire l’APK depuis GitHub
+```bash
+bash scripts/prepare-web.sh
+# Publier .output/public sur un projet Cloudflare Pages :
+npx wrangler pages deploy .output/public --project-name VOTRE_PROJET --branch main
+```
 
-1. La variable de dépôt **`ADMIN_SITE_URL`** a été initialisée avec `https://qr-studio-2328.pages.dev` ; vérifiez-la dans GitHub → **Settings → Secrets and variables → Actions → Variables**.
-2. Dans **Actions → Construire l’APK administrateur**, cliquez sur **Run workflow**. L’entrée `site_url` peut être laissée vide pour utiliser la variable. Si vous la remplissez, fournissez l’origine HTTPS seule, sans `/admin`.
-3. À la fin, ouvrez l’exécution et téléchargez l’artefact **`qr-studio-admin-debug`**. Décompressez-le et installez l’APK sur un appareil Android 7 ou supérieur. Une connexion Internet est nécessaire ; l’écran de connexion ne fonctionnera qu’après configuration de Supabase.
+Le workflow `cloudflare-pages.yml` est volontairement inactif tant que la variable `CLOUDFLARE_PAGES_PROJECT` et les secrets GitHub `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` ne sont pas configurés. Utiliser un jeton Cloudflare à permissions minimales, renouvelé et stocké comme secret. Les modifications GitHub ne sont donc pas publiées automatiquement tant que ce workflow n’est pas activé.
 
-L’APK est une **WebView**, pas un client administratif autonome : elle ouvre `/admin` sur le site indiqué, bloque le HTTP et les erreurs TLS, limite la navigation interne à l’hôte configuré et ouvre les liens HTTPS externes dans le navigateur. L’autorisation admin est contrôlée par le serveur, pas par l’APK.
+## 4. APK via GitHub Actions
 
-**Attention : l’artefact est une version debug**, destinée aux tests, pas une publication Play Store. Chaque machine / exécution GitHub peut utiliser une clé de signature debug différente ; une nouvelle version peut exiger de désinstaller la précédente. Pour une distribution réelle, créer une signature release stable, conserver le keystore en lieu sûr et configurer des secrets GitHub dédiés.
+Le workflow `build-apk.yml` vérifie les pages, copie l’intégralité de `admin-app/web` dans les assets, injecte la **configuration publique**, puis construit et vérifie l’APK. Ajouter dans les GitHub Variables du dépôt QR `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `PUBLIC_SITE_URL` ; relancer l’action après modification. Sans ces valeurs l’APK affiche une page de configuration, mais l’administration ne peut pas se connecter. Télécharger l’artefact `qr-studio-admin` depuis Actions.
 
-## 6. Déploiements ultérieurs depuis GitHub
+Par défaut, seul un **APK debug de test** est créé (Android 7+, non destiné à une publication Play Store). Pour générer aussi une version release et un AAB signés, ajouter les secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` dans le dépôt QR. La signature release doit être conservée de manière sûre. Deux APK signés par des clés différentes peuvent nécessiter la désinstallation de l’ancien avant installation. Tester sur de vrais téléphones avant distribution. Le navigateur externe ouvre les liens hors de l’APK ; l’export CSV utilise le sélecteur de documents Android.
 
-Le site a été publié sur Cloudflare en **Direct Upload**. Le workflow « Déployer Cloudflare Pages » est prêt, mais reste ignoré tant que la variable `CLOUDFLARE_PAGES_PROJECT` n’est pas renseignée. Après rotation des anciens jetons :
-
-- Créez la variable GitHub `CLOUDFLARE_PAGES_PROJECT` = `qr-studio-2328`.
-- Créez les secrets GitHub `CLOUDFLARE_ACCOUNT_ID` et `CLOUDFLARE_API_TOKEN` avec un nouveau jeton limité au déploiement Pages du bon compte.
-- Lancez le workflow manuellement ou poussez sur `main`. Les variables d’exécution et secrets de paiement restent dans Cloudflare, jamais dans le dépôt.
-
-Un projet Pages créé en Direct Upload ne se transforme pas en projet à intégration Git native ; pour utiliser le build Git intégré de Cloudflare, créez un nouveau projet Pages et adaptez les URLs / variables.
-
-## Développement et tests
-
-Node.js 22 recommandé :
+## 5. Aperçu et tests
 
 ```bash
 npm ci
-npm run dev                 # aperçu visuel, sans backend Pages
-npm run check               # tests unitaires + build web
+npm run check             # validation HTML/CSS/JS + fonctions Deno + tests simulés
 npx playwright install chromium
-npm run test:browser        # interface responsive + décodage effectif des QR
+npm run test:browser      # responsive, authentification simulée, QR décodés
+bash scripts/prepare-web.sh
+python3 -m http.server 5173 --directory .output/public
+# http://localhost:5173/ et http://localhost:5173/admin/
 ```
 
-Pour tester aussi les Pages Functions localement avec Wrangler et vos propres secrets, copiez vos valeurs dans un fichier `.dev.vars` **non commité**, puis :
+Sans configuration publique, l’aperçu reste utilisable mais les ventes et la connexion sont désactivées. L’aperçu QR encode un **exemple**, pas les données du client. Les QR générés sont statiques : modifier leur destination après achat nécessiterait une fonctionnalité distincte. Testez toujours le scan avec le logo et les couleurs retenues.
 
-```bash
-npm run build
-npx wrangler pages dev dist --compatibility-date=2026-11-01
-```
+## Sécurité opérationnelle
 
-Ne testez jamais de vrais paiements avec des valeurs de démonstration. Les sources n’intègrent aucune des clés fournies dans la conversation.
+Tout jeton transmis dans une conversation doit être **révoqué puis remplacé**, même s’il semble en lecture seule. Limiter les droits des nouveaux jetons et les stocker dans les emplacements de secrets des services. Le dépôt de référence KARIDZ est consulté uniquement en lecture et sa configuration Supabase n’est pas copiée ici. Une revue de sécurité et des tests réels restent nécessaires avant ouverture commerciale.
