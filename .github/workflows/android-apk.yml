@@ -1,0 +1,59 @@
+name: Construire l'APK administrateur
+on:
+  workflow_dispatch:
+    inputs:
+      site_url:
+        description: 'Origine HTTPS Cloudflare du site (ex. https://mon-site.pages.dev)'
+        required: false
+        type: string
+  push:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ADMIN_SITE_URL != '' }}
+    runs-on: ubuntu-latest
+    env:
+      SITE_URL: ${{ inputs.site_url || vars.ADMIN_SITE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Valider l’adresse HTTPS
+        run: |
+          python - <<'PY'
+          import os, sys
+          from urllib.parse import urlsplit
+          raw = os.environ.get('SITE_URL', '').strip()
+          try:
+              u = urlsplit(raw)
+              if u.scheme != 'https' or not u.hostname or u.username or u.password or u.path not in ('', '/') or u.query or u.fragment:
+                  raise ValueError()
+              if not all(c.isalnum() or c in '.-' for c in u.hostname) or (u.port is not None and not 1 <= u.port <= 65535):
+                  raise ValueError()
+          except ValueError:
+              sys.exit('Renseignez site_url ou la variable GitHub ADMIN_SITE_URL avec une origine HTTPS valide.')
+          print('Site:', u.scheme + '://' + u.netloc)
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Installer Android SDK 35
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Compiler l'APK de test
+        working-directory: android
+        run: gradle --no-daemon :app:assembleDebug -PadminSiteUrl="$SITE_URL"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qr-studio-admin-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

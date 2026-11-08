@@ -1,225 +1,33 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import QRCodeStyling from 'qr-code-styling';
-import {
-  QrCode, Link2, MessageCircle, Mail, Phone, Wifi, Type, Download,
-  ImagePlus, Palette, Sparkles, Printer, ChevronDown, Check, Menu
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowRight, BookOpen, CircleHelp, CreditCard, ExternalLink, FolderOpen, LayoutDashboard, LifeBuoy, LogOut, Menu, QrCode, ShieldCheck, Sparkles, WandSparkles, X } from 'lucide-react';
+import { AuthModal, AuthProvider, useAuth } from './Auth.jsx';
+import Editor from './Editor.jsx';
+import Orders, { PaymentReturn } from './Orders.jsx';
+import Admin from './Admin.jsx';
+import { EMPTY_CONFIG, getConfig, money } from './api.js';
 
-const TYPES = [
-  { id: 'url', label: 'URL', icon: Link2 },
-  { id: 'text', label: 'Texte', icon: Type },
-  { id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
-  { id: 'email', label: 'E-mail', icon: Mail },
-  { id: 'phone', label: 'Téléphone', icon: Phone },
-  { id: 'wifi', label: 'Wi-Fi', icon: Wifi },
-];
-
-const initial = {
-  type: 'url', url: 'https://example.com', text: 'Bonjour ! Découvrez notre site.',
-  phone: '', email: '', subject: '', message: '', country: '+213',
-  wifiName: '', wifiPassword: '', wifiSecurity: 'WPA', hidden: false,
-  fg: '#172554', bg: '#ffffff', dots: 'rounded', corner: 'extra-rounded',
-  label: 'SCANNEZ-MOI', frame: true
-};
-
-function escapeWifi(value) {
-  return String(value).replace(/([\\;,:"])/g, '\\$1');
-}
-
-export default function App() {
-  const [data, setData] = useState(initial);
-  const [logo, setLogo] = useState('');
-  const [tab, setTab] = useState('content');
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [notice, setNotice] = useState('');
-  const qrRef = useRef(null);
-  const qrInstance = useRef(null);
-  const fileRef = useRef(null);
-
-  const payload = useMemo(() => {
-    if (data.type === 'url') return data.url.trim() || 'https://example.com';
-    if (data.type === 'text') return data.text || ' ';
-    if (data.type === 'whatsapp') {
-      const number = data.phone.replace(/[^\d]/g, '');
-      const msg = encodeURIComponent(data.message);
-      return number ? `https://wa.me/${number}${msg ? `?text=${msg}` : ''}` : 'https://wa.me/';
-    }
-    if (data.type === 'email') {
-      const params = new URLSearchParams();
-      if (data.subject) params.set('subject', data.subject);
-      if (data.message) params.set('body', data.message);
-      return `mailto:${data.email || 'contact@example.com'}${params.toString() ? `?${params}` : ''}`;
-    }
-    if (data.type === 'phone') return `tel:${data.phone.replace(/[^\d+]/g, '')}`;
-    if (data.type === 'wifi') {
-      const security = data.wifiSecurity === 'nopass' ? 'nopass' : data.wifiSecurity;
-      return `WIFI:T:${security};S:${escapeWifi(data.wifiName)};P:${escapeWifi(data.wifiPassword)};H:${data.hidden ? 'true' : 'false'};;`;
-    }
-    return '';
-  }, [data]);
-
-  useEffect(() => {
-    const instance = new QRCodeStyling({
-      width: 300, height: 300, type: 'svg', data: payload,
-      image: logo || undefined,
-      dotsOptions: { color: data.fg, type: data.dots },
-      backgroundOptions: { color: data.bg },
-      cornersSquareOptions: { color: data.fg, type: data.corner },
-      cornersDotOptions: { color: data.fg, type: 'dot' },
-      imageOptions: { crossOrigin: 'anonymous', margin: 7, imageSize: 0.28, hideBackgroundDots: true },
-      qrOptions: { errorCorrectionLevel: 'H' }
-    });
-    qrInstance.current = instance;
-    if (qrRef.current) {
-      qrRef.current.innerHTML = '';
-      instance.append(qrRef.current);
-    }
-  }, [payload, data.fg, data.bg, data.dots, data.corner, logo]);
-
-  const update = (key, value) => setData(prev => ({ ...prev, [key]: value }));
-  const download = async (extension) => {
-    if (!qrInstance.current) return;
-    await qrInstance.current.download({ name: 'qr-studio', extension });
-    setNotice(`QR code téléchargé en ${extension.toUpperCase()}`);
-    setTimeout(() => setNotice(''), 2600);
+function Brand({ compact = false }) { return <span className={`brand ${compact ? 'compact' : ''}`}><span className="brand-mark"><QrCode size={21} strokeWidth={2.3}/></span><span>qr<span>studio</span><b>.</b></span></span>; }
+function Site({ config }) {
+  const [location, setLocation] = useState(() => window.location.pathname + window.location.search);
+  const [menuOpen, setMenuOpen] = useState(false); const [authModal, setAuthModal] = useState(''); const { session, signOut } = useAuth();
+  const path = location.split('?')[0]; const params = new URLSearchParams(location.split('?')[1] || '');
+  const navigate = (to) => {
+    const [beforeHash, hash] = to.split('#'); window.history.pushState({}, '', to); setLocation(beforeHash || '/'); setMenuOpen(false);
+    if (hash) setTimeout(() => document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth' }), 20); else window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-  const uploadLogo = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setNotice('Choisissez un fichier image.');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => setLogo(String(reader.result));
-    reader.readAsDataURL(file);
-  };
-  const reset = () => { setData(initial); setLogo(''); };
-
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <a className="brand" href="#"><span className="brand-icon"><QrCode size={23}/></span><span>qr<span className="brand-accent">studio</span></span></a>
-        <nav className={menuOpen ? 'nav-links open' : 'nav-links'}>
-          <a href="#create" onClick={() => setMenuOpen(false)}>Créer un QR code</a>
-          <a href="#how" onClick={() => setMenuOpen(false)}>Comment ça marche</a>
-        </nav>
-        <div className="top-actions"><span className="secure"><span className="secure-dot"/> Gratuit & privé</span><button className="mobile-menu" onClick={() => setMenuOpen(!menuOpen)} aria-label="Ouvrir le menu"><Menu/></button></div>
-      </header>
-
-      <main>
-        <section className="hero">
-          <div className="eyebrow"><Sparkles size={14}/> SIMPLE · RAPIDE · PERSONNALISABLE</div>
-          <h1>Vos idées, en un <span>scan.</span></h1>
-          <p>Créez des QR codes uniques en quelques secondes. Personnalisez leur apparence et téléchargez-les gratuitement.</p>
-        </section>
-
-        <section className="workspace" id="create">
-          <div className="editor panel">
-            <div className="panel-heading">
-              <div><span className="step">ÉTAPE 01</span><h2>Configurez votre QR code</h2></div>
-              <button className="reset-btn" onClick={reset}>Réinitialiser</button>
-            </div>
-            <div className="tabs">
-              <button className={tab === 'content' ? 'tab active' : 'tab'} onClick={() => setTab('content')}>Contenu</button>
-              <button className={tab === 'design' ? 'tab active' : 'tab'} onClick={() => setTab('design')}>Personnalisation</button>
-            </div>
-
-            {tab === 'content' ? <>
-              <label className="field-label">TYPE DE QR CODE</label>
-              <div className="type-grid">
-                {TYPES.map(item => {
-                  const Icon = item.icon;
-                  return <button key={item.id} className={data.type === item.id ? 'type-option selected' : 'type-option'} onClick={() => update('type', item.id)}><Icon size={18}/><span>{item.label}</span></button>;
-                })}
-              </div>
-              <div className="form-fields">
-                {data.type === 'url' && <Field label="Adresse du site web" hint="https://" value={data.url} onChange={v => update('url', v)} placeholder="https://monsite.com"/>}
-                {data.type === 'text' && <TextField label="Votre texte" value={data.text} onChange={v => update('text', v)} placeholder="Écrivez votre message..."/>}
-                {data.type === 'whatsapp' && <>
-                  <Field label="Numéro WhatsApp" value={data.phone} onChange={v => update('phone', v)} placeholder="213555123456"/>
-                  <TextField label="Message prérempli (facultatif)" value={data.message} onChange={v => update('message', v)} placeholder="Bonjour, je souhaite en savoir plus..."/>
-                  <p className="helper">Incluez l'indicatif du pays, sans espaces si possible.</p>
-                </>}
-                {data.type === 'email' && <>
-                  <Field label="Adresse e-mail" value={data.email} onChange={v => update('email', v)} placeholder="contact@exemple.com"/>
-                  <Field label="Objet (facultatif)" value={data.subject} onChange={v => update('subject', v)} placeholder="Demande d'information"/>
-                  <TextField label="Message (facultatif)" value={data.message} onChange={v => update('message', v)} placeholder="Votre message..."/>
-                </>}
-                {data.type === 'phone' && <Field label="Numéro de téléphone" value={data.phone} onChange={v => update('phone', v)} placeholder="+213 555 12 34 56"/>}
-                {data.type === 'wifi' && <>
-                  <Field label="Nom du réseau (SSID)" value={data.wifiName} onChange={v => update('wifiName', v)} placeholder="Mon Wi-Fi"/>
-                  <Field label="Mot de passe" value={data.wifiPassword} onChange={v => update('wifiPassword', v)} placeholder="Mot de passe Wi-Fi"/>
-                  <label className="field-label">SÉCURITÉ</label>
-                  <select className="select-input" value={data.wifiSecurity} onChange={e => update('wifiSecurity', e.target.value)}><option value="WPA">WPA / WPA2</option><option value="WEP">WEP</option><option value="nopass">Aucun mot de passe</option></select>
-                  <label className="check-row"><input type="checkbox" checked={data.hidden} onChange={e => update('hidden', e.target.checked)}/> Réseau masqué</label>
-                </>}
-              </div>
-            </> : <>
-              <div className="design-section">
-                <div className="section-title"><Palette size={17}/> Couleurs</div>
-                <div className="color-row">
-                  <ColorControl label="QR code" value={data.fg} onChange={v => update('fg', v)}/>
-                  <ColorControl label="Arrière-plan" value={data.bg} onChange={v => update('bg', v)}/>
-                </div>
-                <div className="section-title"><Sparkles size={17}/> Style du QR code</div>
-                <label className="field-label">FORME DES POINTS</label>
-                <div className="choice-row">{[['square','Carré'],['dots','Rond'],['rounded','Arrondi'],['classy','Élégant']].map(([v,l]) => <button key={v} className={data.dots === v ? 'choice selected' : 'choice'} onClick={() => update('dots', v)}>{l}</button>)}</div>
-                <label className="field-label">COINS DU QR CODE</label>
-                <div className="choice-row">{[['square','Carré'],['dot','Rond'],['extra-rounded','Arrondi']].map(([v,l]) => <button key={v} className={data.corner === v ? 'choice selected' : 'choice'} onClick={() => update('corner', v)}>{l}</button>)}</div>
-                <div className="section-title"><ImagePlus size={17}/> Logo au centre</div>
-                <div className="upload-box">
-                  {logo ? <><img src={logo} alt="Logo importé"/><span>Logo ajouté</span><button onClick={() => setLogo('')}>Supprimer</button></> : <><button className="upload-button" onClick={() => fileRef.current?.click()}><ImagePlus size={17}/> Importer un logo</button><span>PNG, JPG ou SVG · conseillé : image carrée</span></>}
-                  <input ref={fileRef} type="file" accept="image/*" hidden onChange={uploadLogo}/>
-                </div>
-                <div className="section-title"><Type size={17}/> Cadre et légende</div>
-                <label className="check-row"><input type="checkbox" checked={data.frame} onChange={e => update('frame', e.target.checked)}/> Afficher un cadre</label>
-                {data.frame && <Field label="Texte sous le QR code" value={data.label} onChange={v => update('label', v)} placeholder="SCANNEZ-MOI"/>}
-              </div>
-            </>}
-            <div className="editor-foot"><span><Check size={15}/> Aperçu mis à jour automatiquement</span><button onClick={() => setTab(tab === 'content' ? 'design' : 'content')}>{tab === 'content' ? 'Personnaliser' : 'Modifier le contenu'} <span>→</span></button></div>
-          </div>
-
-          <aside className="preview-column">
-            <div className="preview-card panel">
-              <div className="preview-head"><div><span className="step">ÉTAPE 02</span><h2>Aperçu en direct</h2></div><span className="live"><i/> EN DIRECT</span></div>
-              <div className="qr-stage">
-                <div className={data.frame ? 'qr-paper framed' : 'qr-paper'} style={{background: data.bg}}>
-                  <div className="qr-render" ref={qrRef}/>
-                  {data.frame && <div className="qr-caption" style={{color: data.fg}}>{data.label || ' '}</div>}
-                </div>
-              </div>
-              <div className="preview-meta"><span><span className="meta-dot"/> QR code prêt à être scanné</span><span>300 × 300 px</span></div>
-              <div className="download-area">
-                <button className="download-main" onClick={() => download('png')}><Download size={18}/> Télécharger PNG</button>
-                <div className="download-secondary"><button onClick={() => download('svg')}>Télécharger SVG</button><span>·</span><button onClick={() => window.print()}><Printer size={15}/> Imprimer / PDF</button></div>
-              </div>
-              {notice && <div className="notice"><Check size={15}/>{notice}</div>}
-            </div>
-            <div className="privacy-note"><span className="privacy-icon">✓</span><div><strong>Vos données restent privées</strong><p>La création se fait dans votre navigateur. Vos contenus ne sont pas envoyés à un serveur.</p></div></div>
-          </aside>
-        </section>
-
-        <section className="how-section" id="how">
-          <div className="eyebrow">EN 3 ÉTAPES</div><h2>Un QR code prêt en quelques clics.</h2>
-          <div className="how-grid">
-            <div><span>01</span><h3>Choisissez le contenu</h3><p>Ajoutez un lien, un message, vos coordonnées ou les accès Wi-Fi.</p></div>
-            <div><span>02</span><h3>Personnalisez le design</h3><p>Adaptez les couleurs, les formes et ajoutez votre logo.</p></div>
-            <div><span>03</span><h3>Téléchargez et partagez</h3><p>Exportez votre création en PNG ou SVG, ou imprimez-la.</p></div>
-          </div>
-        </section>
-      </main>
-      <footer><a className="brand" href="#"><span className="brand-icon"><QrCode size={20}/></span><span>qr<span className="brand-accent">studio</span></span></a><span>Créez. Personnalisez. Partagez.</span><span>© {new Date().getFullYear()} QR Studio</span></footer>
+  useEffect(() => { const pop = () => { setLocation(window.location.pathname + window.location.search); setMenuOpen(false); }; window.addEventListener('popstate', pop); return () => window.removeEventListener('popstate', pop); }, []);
+  function link(to) { return e => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate(to); } }; }
+  const nav = <><div className="nav-caption">MON ESPACE</div><a href="/" onClick={link('/')} className={`side-link ${path === '/' ? 'active' : ''}`}><WandSparkles size={18}/> Créer un QR code {path === '/' && <span/>}</a><a href="/mes-qr" onClick={link('/mes-qr')} className={`side-link ${path === '/mes-qr' ? 'active' : ''}`}><FolderOpen size={18}/> Mes créations {path === '/mes-qr' && <span/>}</a><a href="/tarifs" onClick={link('/tarifs')} className={`side-link ${path === '/tarifs' ? 'active' : ''}`}><CreditCard size={18}/> Tarifs {path === '/tarifs' && <span/>}</a><div className="nav-caption nav-caption-space">EN SAVOIR PLUS</div><a href="/#comment-ca-marche" onClick={link('/#comment-ca-marche')} className="side-link"><BookOpen size={18}/> Comment ça marche</a><a href="/confidentialite" onClick={link('/confidentialite')} className={`side-link ${path === '/confidentialite' ? 'active' : ''}`}><ShieldCheck size={18}/> Confidentialité</a><a href="/admin" onClick={link('/admin')} className={`side-link ${path === '/admin' ? 'active' : ''}`}><LayoutDashboard size={18}/> Administration</a></>;
+  return <div className="app-layout">
+    <aside className={`sidebar ${menuOpen ? 'open' : ''}`}><a href="/" onClick={link('/')} aria-label="QR Studio, accueil" className="brand-link"><Brand/></a><nav className="side-nav">{nav}</nav><div className="sidebar-bottom"><div className="side-promo"><span className="promo-icon"><Sparkles size={17}/></span><strong>Un scan, mille<br/>possibilités.</strong><p>Une belle idée mérite un beau QR code.</p><a href="/" onClick={link('/')}>C’est parti <ArrowRight size={14}/></a></div><div className="side-support"><LifeBuoy size={18}/><div><strong>Une question ?</strong>{config.supportEmail ? <a href={`mailto:${config.supportEmail}`}>Nous contacter</a> : <span>Support à configurer</span>}</div></div></div></aside>
+    {menuOpen && <button className="mobile-overlay" aria-label="Fermer le menu" onClick={() => setMenuOpen(false)}/>}
+    <div className="main-column"><header className="topbar"><div className="mobile-brand"><a href="/" onClick={link('/')}><Brand compact/></a></div><button className="mobile-menu icon-button" aria-label={menuOpen ? 'Fermer le menu' : 'Ouvrir le menu'} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={22}/> : <Menu size={22}/>}</button><div className="breadcrumbs"><span>Votre espace</span><b>/</b><strong>{path === '/admin' ? 'Administration' : path === '/mes-qr' ? 'Mes créations' : path === '/tarifs' ? 'Tarifs' : path === '/confidentialite' ? 'Confidentialité' : 'Créer un QR code'}</strong></div><div className="top-actions"><a className="top-help" href="/#comment-ca-marche" onClick={link('/#comment-ca-marche')}><CircleHelp size={16}/> Besoin d’aide ?</a><div className="top-divider"/>{session ? <button className="account-button" onClick={signOut} title="Se déconnecter"><span>{(session.user?.email || 'U').slice(0, 1).toUpperCase()}</span><strong className="account-email">{session.user?.email}</strong><LogOut size={15}/></button> : <button className="button button-dark top-login" onClick={() => setAuthModal('login')}>Se connecter <ArrowRight size={15}/></button>}</div></header>
+      <main className="content-wrap">{path === '/admin' ? <Admin/> : path === '/mes-qr' ? <Orders openAuth={() => setAuthModal('login')} navigate={navigate}/> : path === '/tarifs' ? <Pricing config={config} navigate={navigate}/> : path === '/confidentialite' ? <Privacy config={config}/> : params.has('payment') && params.get('order') ? <PaymentReturn orderId={params.get('order')} canceled={params.get('payment') === 'cancel'} openAuth={() => setAuthModal('login')} navigate={navigate}/> : <Editor config={config} openAuth={() => setAuthModal('login')} navigate={navigate}/>}</main>
+      <footer className="footer"><span>© {new Date().getFullYear()} QR Studio <i>·</i> Créé pour vos grandes idées.</span><div><a href="/confidentialite" onClick={link('/confidentialite')}>Confidentialité</a><a href="/admin" onClick={link('/admin')}>Administration</a></div></footer>
     </div>
-  );
+    {authModal && <AuthModal initialMode={authModal} onClose={() => setAuthModal('')}/>}
+  </div>;
 }
-
-function Field({ label, value, onChange, placeholder, hint }) {
-  return <label className="field"><span className="field-label">{label}</span><div className="input-wrap">{hint && <span>{hint}</span>}<input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}/></div></label>;
-}
-function TextField({ label, value, onChange, placeholder }) {
-  return <label className="field"><span className="field-label">{label}</span><textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={3}/></label>;
-}
-function ColorControl({ label, value, onChange }) {
-  return <label className="color-control"><span>{label}</span><div><input type="color" value={value} onChange={e => onChange(e.target.value)}/><code>{value.toUpperCase()}</code></div></label>;
-}
+function Pricing({ config, navigate }) { return <section className="secondary-page pricing-page"><div className="eyebrow"><span className="eyebrow-dot"/> SIMPLE & TRANSPARENT</div><h1>Un beau QR code<span>,<br/>sans mauvaise surprise.</span></h1><p>Personnalisez votre création gratuitement. Le téléchargement est payant après confirmation de la commande.</p><div className="pricing-card surface"><div className="pricing-top"><div className="heading-icon"><Sparkles size={20}/></div><span>QR PERSONNALISÉ</span></div><h2>Votre création, à votre image.</h2><div className="pricing-big">{money(config.priceDzd)} <small>{config.priceDzd ? '/ création' : 'tarif à définir'}</small></div><p>Un tarif par création est prévu. Le prix définitif sera fixé par l’administrateur.</p><ul><li><ShieldCheck size={17}/> Aperçu gratuit et personnalisation</li><li><ShieldCheck size={17}/> Logo, couleurs, formes et légende</li><li><ShieldCheck size={17}/> Téléchargement PNG HD et SVG après paiement</li><li><ShieldCheck size={17}/> Votre commande retrouvable dans votre compte</li></ul><button className="button button-primary full" onClick={() => navigate('/')}>Créer mon QR code <ArrowRight size={17}/></button><div className="secure-checkout"><CreditCard size={14}/> Paiement prévu via Chargily · CIB & EDAHABIA</div></div></section>; }
+function Privacy({ config }) { return <section className="secondary-page text-page"><div className="eyebrow"><span className="eyebrow-dot"/> EN TOUTE TRANSPARENCE</div><h1>Vos données<span>, simplement.</span></h1><p>Quelques informations sur le fonctionnement de QR Studio.</p><div className="surface legal-card"><h2>Avant une commande</h2><p>Le brouillon est traité dans votre navigateur. L’aperçu utilise un contenu d’exemple : il ne contient pas votre destination personnelle.</p><h2>Lors d’une commande</h2><p>Pour vous permettre de retrouver votre création, votre contenu et votre design sont transmis au serveur et enregistrés sous forme chiffrée. Votre adresse e-mail, le montant et le statut de votre commande sont également conservés.</p><h2>Paiement</h2><p>Le paiement est effectué sur la page de Chargily. QR Studio ne vous demande pas vos coordonnées bancaires sur son site.</p><h2>Attention au contenu partagé</h2><p>Un QR code est lisible par toute personne qui le scanne. Évitez d’y mettre des données sensibles ; un QR Wi-Fi peut notamment révéler son mot de passe.</p><h2>Une question ?</h2><p>{config.supportEmail ? <>Contactez le propriétaire à <a href={`mailto:${config.supportEmail}`}>{config.supportEmail}</a>.</> : 'Le propriétaire doit configurer son adresse de contact.'}</p><p className="legal-small">Le responsable du site doit compléter cette page avec ses informations légales, la durée de conservation et les modalités de suppression avant la mise en production.</p></div></section>; }
+export default function App() { const [config, setConfig] = useState(EMPTY_CONFIG); useEffect(() => { getConfig().then(setConfig); }, []); return <AuthProvider config={config}><Site config={config}/></AuthProvider>; }
