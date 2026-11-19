@@ -9,3 +9,11 @@ verify_jwt = false
 # Login public limité ; le mot de passe est vérifié par Supabase Auth, puis le rôle admin est vérifié.
 [functions.qr-admin-auth]
 verify_jwt = false
+# Connexion par code public mais protégé contre les tentatives abusives.
+[functions.qr-client-auth]
+verify_jwt = false
+# Ces fonctions exigent un JWT et revérifient l'identité et les droits.
+[functions.qr-client-admin]
+verify_jwt = true
+[functions.qr-client-qr]
+verify_jwt = true

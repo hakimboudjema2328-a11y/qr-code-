@@ -133,7 +133,7 @@ function escapeXml(value) {
   return String(value).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
 }
 
-/** Generate the same styles for the dummy preview and the paid, server-side SVG export. */
+/** Generate the same styles for the dummy preview and the authenticated, server-side SVG export. */
 export function renderSvg(raw, { preview = false } = {}) {
   const snapshot = normalizeSnapshot(raw, { enforceContrast: !preview });
   const payload = preview ? 'https://example.com/qr-studio-preview' : snapshot.payload;

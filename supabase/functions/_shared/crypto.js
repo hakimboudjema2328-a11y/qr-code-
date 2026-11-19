@@ -27,9 +27,3 @@ export async function decryptSnapshot(ciphertext, iv, secret, orderId, userId) {
     return JSON.parse(new TextDecoder().decode(plain));
   } catch { throw new AppError(503, 'La création ne peut pas être déchiffrée.'); }
 }
-export async function verifyChargilySignature(secret, bodyBytes, signature) {
-  if (!secret || !/^[a-f0-9]{64}$/i.test(signature || '')) return false;
-  const bytes = new Uint8Array(signature.match(/.{2}/g).map(pair => parseInt(pair, 16)));
-  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
-  return crypto.subtle.verify('HMAC', key, bytes, bodyBytes);
-}

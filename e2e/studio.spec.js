@@ -2,72 +2,61 @@ import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-const adminId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const require=createRequire(import.meta.url);
+const aid='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',cid='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',planId='cccccccc-cccc-4ccc-8ccc-cccccccccccc',ver='dddddddd-dddd-4ddd-8ddd-dddddddddddd',sid='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',qrId='ffffffff-ffff-4fff-8fff-ffffffffffff';
 const encode=x=>Buffer.from(JSON.stringify(x)).toString('base64url');
-const token=encode({alg:'HS256',typ:'JWT'})+'.'+encode({sub:adminId,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})+'.c2lnbmF0dXJl';
-const session={access_token:token,refresh_token:'mock-refresh-token',expires_in:3600,token_type:'bearer',user:{id:adminId,aud:'authenticated',role:'authenticated',email:'admin@example.com',email_confirmed_at:'2025-01-01T00:00:00Z'}};
-async function mockSupabase(page,options={}){
-  const calls=[];
-  await page.route('**/supabase-config.js',route=>route.fulfill({status:200,contentType:'application/javascript',body:`window.QR_CONFIG={supabaseUrl:'https://mock.supabase.co',supabaseAnonKey:'public-example',publicSiteUrl:'https://qr.example'};`}));
-  await page.route('https://mock.supabase.co/**',async route=>{
-    const req=route.request(),u=new URL(req.url()),method=req.method();calls.push({url:u.pathname,method,body:req.postData()});
-    const headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'GET,POST,PATCH,OPTIONS','Content-Type':'application/json'};
-    if(method==='OPTIONS')return route.fulfill({status:204,headers,body:''});
-    let body={};
-    if(u.pathname==='/auth/v1/token')body=session;
-    else if(u.pathname==='/auth/v1/user')body=session.user;
-    else if(u.pathname==='/auth/v1/recover')body={};
-    else if(u.pathname==='/auth/v1/logout')body={};
-    else if(u.pathname==='/rest/v1/rpc/qr_is_admin')body=true;
-    else if(u.pathname==='/rest/v1/rpc/qr_admin_stats')body=[{paid_count:1,revenue_dzd:850,pending_count:0}];
-    else if(u.pathname==='/rest/v1/qr_studio_settings'&&method==='GET')body={price_dzd:850,checkout_enabled:true,payment_mode:'test',announcement:'',support_email:''};
-    else if(u.pathname==='/rest/v1/qr_studio_settings'&&method==='PATCH')body=[{id:1}];
-    else if(u.pathname==='/rest/v1/qr_studio_orders')body=options.orders||[];
-    else if(u.pathname==='/functions/v1/qr-admin-auth')body={access_token:session.access_token,refresh_token:session.refresh_token};
-    else if(u.pathname==='/functions/v1/qr-checkout')body={id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',checkoutUrl:'https://pay.chargily.dz/test/demo'};
-    else if(u.pathname==='/functions/v1/qr-order')body={verification:'unavailable',order:{status:'pending'}};
-    else return route.fulfill({status:404,headers,body:'{}'});
-    return route.fulfill({status:200,headers,body:JSON.stringify(body)});
-  });return calls;
+function session(id,metadata={}){const user={id,aud:'authenticated',role:'authenticated',email:'not-visible@example.invalid',email_confirmed_at:'2026-01-01',app_metadata:metadata};return {access_token:encode({alg:'HS256',typ:'JWT'})+'.'+encode({sub:id,session_id:sid,app_metadata:metadata,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})+'.c2lnbmF0dXJl',refresh_token:'mock-refresh-'+id,expires_in:3600,token_type:'bearer',user}}
+const adminSession=session(aid),clientSession=session(cid,{qr_access_version:ver});
+async function mockSupabase(page,{withPlan=true,expired=false,withQr=false}={}){
+ const calls=[],plans=withPlan?[{id:planId,name:'Formule Test',description:'Une formule de démonstration',price_dzd:1250,duration_days:30,is_active:true,position:0,created_at:'2026-01-01'}]:[],clients=[{user_id:cid,client_name:'Client Exemple',phone:'+213 555 00 00 00',plan_id:planId,plan_name:'Formule Test',expires_at:expired?'2024-01-01T00:00:00Z':null,is_active:true,created_at:'2026-01-01'}],qrs=withQr?[{id:qrId,user_id:cid,title:'Ancien QR',qr_type:'url',created_at:'2026-01-01'}]:[];
+ await page.route('**/supabase-config.js',route=>route.fulfill({contentType:'application/javascript',body:"window.QR_CONFIG={supabaseUrl:'https://mock.supabase.co',supabaseAnonKey:'public-example',publicSiteUrl:'https://qr.example'};"}));
+ await page.route('https://mock.supabase.co/**',async route=>{
+  const req=route.request(),u=new URL(req.url()),method=req.method(),raw=req.postData();let sent;try{sent=raw?JSON.parse(raw):null}catch{sent=null}calls.push({url:u.pathname,method,body:sent,query:u.search});
+  const headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'GET,POST,PATCH,OPTIONS','Content-Type':'application/json'};if(method==='OPTIONS')return route.fulfill({status:204,headers,body:''});let body={};
+  if(u.pathname==='/auth/v1/user'){const bearer=req.headers().authorization||'';body=bearer.includes(adminSession.access_token)?adminSession.user:clientSession.user}
+  else if(u.pathname==='/auth/v1/token')body=clientSession;
+  else if(u.pathname==='/auth/v1/recover'||u.pathname==='/auth/v1/logout')body={};
+  else if(u.pathname==='/rest/v1/rpc/qr_is_admin')body=true;
+  else if(u.pathname==='/rest/v1/rpc/qr_admin_overview')body=[{clients_total:clients.length,clients_active:expired?0:clients.length,qr_total:qrs.length,plans_active:plans.filter(x=>x.is_active).length}];
+  else if(u.pathname==='/rest/v1/qr_studio_settings'&&method==='GET')body={announcement:'',whatsapp_number:'213799888645',instagram_url:'https://www.instagram.com/massify_services/',facebook_url:'https://www.facebook.com/profile.php?id=61594892763460&locale=fr_FR'};
+  else if(u.pathname==='/rest/v1/qr_studio_settings'&&method==='PATCH')body=[{id:1}];
+  else if(u.pathname==='/rest/v1/qr_studio_plans'&&method==='GET')body=u.searchParams.has('is_active')?plans.filter(p=>p.is_active):plans;
+  else if(u.pathname==='/rest/v1/qr_studio_plans'&&method==='POST'){let p=Array.isArray(sent)?sent[0]:sent;plans.unshift({id:'11111111-1111-4111-8111-111111111111',position:0,created_at:'2026-01-01',...p});body=[{id:plans[0].id}]}
+  else if(u.pathname==='/rest/v1/qr_studio_plans'&&method==='PATCH'){const id=(u.searchParams.get('id')||'').replace('eq.',''),p=plans.find(x=>x.id===id);if(p)Object.assign(p,sent);body=p?[{id}]:[]}
+  else if(u.pathname==='/rest/v1/qr_studio_clients'&&method==='GET')body=clients;
+  else if(u.pathname==='/rest/v1/qr_studio_clients'&&method==='PATCH'){const id=(u.searchParams.get('user_id')||'').replace('eq.',''),c=clients.find(x=>x.user_id===id);if(c)Object.assign(c,sent);body=c?[{user_id:id}]:[]}
+  else if(u.pathname==='/rest/v1/qr_studio_client_qrs')body=qrs;
+  else if(u.pathname==='/functions/v1/qr-admin-auth')body={access_token:adminSession.access_token,refresh_token:adminSession.refresh_token};
+  else if(u.pathname==='/functions/v1/qr-client-auth')body={access_token:clientSession.access_token,refresh_token:clientSession.refresh_token};
+  else if(u.pathname==='/functions/v1/qr-client-admin'){const newId='22222222-2222-4222-8222-222222222222';clients.unshift({user_id:newId,client_name:sent.client_name||'Client Exemple',phone:sent.phone||'',plan_id:sent.plan_id||null,plan_name:'',expires_at:sent.expires_at||null,is_active:true,created_at:'2026-01-02'});body={user_id:newId,client_name:sent.client_name||'Client Exemple',code:'9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N'}}
+  else if(u.pathname==='/functions/v1/qr-client-qr'){if(sent.action==='create'){qrs.unshift({id:sent.id,user_id:cid,title:sent.title||'Lien web',qr_type:sent.draft.type,created_at:'2026-01-01'})}body={id:sent.id,svg:'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/></svg>'}}
+  else return route.fulfill({status:404,headers,body:'{}'});
+  return route.fulfill({status:200,headers,body:JSON.stringify(body)});
+ });return {calls,plans,clients,qrs};
 }
-test('éditeur statique : huit types, aperçu fictif et ventes fermées',async({page})=>{
-  const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto('/');
-  await expect(page.getByRole('heading',{name:/Une belle idée/})).toBeVisible();
-  await expect(page.getByRole('button',{name:/Commandes bientôt disponibles/})).toBeDisabled();
-  const preview=await page.locator('#preview-qr').innerHTML();await page.locator('[data-key=url]').fill('https://confidentiel.example/abc');expect(await page.locator('#preview-qr').innerHTML()).toBe(preview);
-  await page.getByRole('button',{name:'Wi-Fi'}).click();await page.locator('[data-key=wifiName]').fill('Mon Wi-Fi');await page.locator('[data-key=wifiPassword]').fill('ancien secret');await page.locator('[data-key=wifiSecurity]').selectOption('nopass');await expect(page.locator('[data-key=wifiPassword]')).toBeDisabled();await expect(page.locator('[data-key=wifiPassword]')).toHaveValue('');
-  await page.locator('#fg').evaluate(el=>{el.value='#ffffff';el.dispatchEvent(new Event('input',{bubbles:true}))});await expect(page.locator('#contrast-warning')).toBeVisible();expect(errors).toEqual([]);
+test('site : formules absentes sans prix inventé et réseaux visibles',async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));await mockSupabase(page,{withPlan:false});await page.goto('/');await expect(page.getByText('Les formules arrivent bientôt.')).toBeVisible();await expect(page.locator('#request-submit')).toBeDisabled();await expect(page.locator('[data-instagram]').first()).toHaveAttribute('href',/instagram\.com\/massify_services/);await expect(page.locator('[data-facebook]').first()).toHaveAttribute('href',/61594892763460/);await expect(page.locator('[data-whatsapp]').first()).toHaveAttribute('href',/^https:\/\/wa\.me\/213799888645/);expect(errors).toEqual([]);
 });
-test('navigation mobile et administration non configurée sans débordement',async({page})=>{
-  await page.setViewportSize({width:375,height:812});await page.goto('/');await page.getByRole('button',{name:'Ouvrir le menu'}).click();await expect(page.locator('#mobile-menu')).toHaveClass(/open/);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-  await page.goto('/admin/');await expect(page.getByText('La connexion n’est pas encore configurée.',{exact:false})).toBeVisible();await expect(page.locator('#login-form')).toBeHidden();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+test('la demande WhatsApp contient la formule et les informations choisies',async({page,context})=>{
+ await mockSupabase(page);await context.route('https://wa.me/**',r=>r.fulfill({status:200,contentType:'text/html',body:'WhatsApp simulé'}));await page.goto('/');await page.getByRole('button',{name:'Choisir cette formule →'}).click();await page.locator('#request-name').fill('Amina Client');await page.locator('#request-phone').fill('+213 555 12 34 56');await page.locator('#request-details').fill('Projet boutique');const popupPromise=page.waitForEvent('popup');await page.locator('#request-submit').click();const popup=await popupPromise;await popup.waitForLoadState();const url=new URL(popup.url());expect(url.hostname).toBe('wa.me');expect(url.pathname).toBe('/213799888645');const message=url.searchParams.get('text');expect(message).toContain('Abonnement : Formule Test');expect(message).toContain('Amina Client');expect(message).toContain('+213 555 12 34 56');expect(message).toContain('Projet boutique');
 });
-test('administration : compte autorisé, statistiques, paramétrage et échappement',async({page})=>{
-  const calls=await mockSupabase(page,{orders:[{id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',customer_email:'<img src=x onerror=alert(1)>',qr_type:'url',status:'paid',amount_dzd:850,payment_mode:'test',created_at:'2026-11-08T12:00:00Z'}]});
-  await page.goto('/admin/');await expect(page.locator('#email')).toHaveCount(0);await page.locator('#password').fill('examplepassword');await page.locator('#login-button').click();
-  await expect(page.getByRole('heading',{name:/Votre activité, en un regard/})).toBeVisible();await expect(page.locator('#admin-label')).toHaveText('Administrateur');await expect(page.locator('#stat-paid')).toHaveText('1');await expect(page.locator('#recent-rows img')).toHaveCount(0);
-  await page.locator('.sidebar [data-view=settings]').click();await page.locator('#price').fill('1250');await page.locator('#announcement').fill('Bonjour');await page.locator('#save-button').click();await expect(page.getByText('Paramètres enregistrés.')).toBeVisible();
-  const patch=calls.find(c=>c.url==='/rest/v1/qr_studio_settings'&&c.method==='PATCH');expect(JSON.parse(patch.body)).toMatchObject({price_dzd:1250,announcement:'Bonjour'});
+test('client : connexion par code, création et téléchargement',async({page})=>{
+ const {calls}=await mockSupabase(page);await page.goto('/');await page.locator('[data-key=url]').fill('https://example.com/page');await page.locator('#qr-title').fill('Ma carte');await page.locator('#generate-button').click();await expect(page.locator('#auth-code')).toBeVisible();await expect(page.locator('#auth-email')).toBeHidden();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();await expect(page.getByText('Votre QR est prêt ! Téléchargez-le en SVG ou PNG.')).toBeVisible();await expect(page.getByRole('heading',{name:'Ma carte'})).toBeVisible();const login=calls.find(x=>x.url==='/functions/v1/qr-client-auth');expect(Object.keys(login.body)).toEqual(['code']);const generated=calls.find(x=>x.url==='/functions/v1/qr-client-qr'&&x.body.action==='create');expect(generated.body.draft.content.url).toBe('https://example.com/page');const download=page.waitForEvent('download');await page.getByRole('button',{name:'SVG ↓'}).click();expect((await download).suggestedFilename()).toMatch(/\.svg$/);
 });
-test('le paiement utilise le compte et transmet la création au serveur',async({page})=>{
- const calls=await mockSupabase(page);await page.route('https://pay.chargily.dz/**',route=>route.fulfill({status:200,contentType:'text/html',body:'Paiement simulé'}));
- await page.goto('/');await expect(page.locator('#checkout-button')).toBeEnabled();await page.locator('[data-key=url]').fill('https://exemple.dz/ma-page');await page.locator('#checkout-button').click();
- await expect(page.getByRole('dialog')).toBeVisible();await page.locator('#auth-email').fill('admin@example.com');await page.locator('#auth-password').fill('examplepassword');await page.locator('#auth-submit').click();await page.waitForURL('https://pay.chargily.dz/test/demo');
- const checkout=calls.find(c=>c.url==='/functions/v1/qr-checkout');expect(checkout).toBeTruthy();expect(JSON.parse(checkout.body).draft.content.url).toBe('https://exemple.dz/ma-page');
+test('abonnement expiré : anciennes créations consultables et création bloquée',async({page})=>{
+ await mockSupabase(page,{expired:true,withQr:true});await page.goto('/');await page.getByRole('button',{name:'Mes QR codes'}).first().click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();await expect(page.getByText(/votre abonnement a expiré : vous pouvez toujours consulter/i)).toBeVisible();await expect(page.getByRole('heading',{name:'Ancien QR'})).toBeVisible();await expect(page.getByRole('button',{name:'SVG ↓'})).toBeVisible();await page.getByRole('button',{name:'← Retour à la création'}).click();await expect(page.locator('#generate-button')).toBeDisabled();
 });
-test('récupération de mot de passe utilise la redirection autorisée',async({page})=>{
- const calls=await mockSupabase(page);await page.goto('/');await page.locator('.head-actions .account-label').click();await page.getByRole('button',{name:'Mot de passe oublié ?'}).click();await page.locator('#auth-email').fill('demo@example.com');await page.getByRole('button',{name:/Envoyer le lien/}).click();await expect(page.getByText(/Si cette adresse possède un compte/)).toBeVisible();expect(calls.some(c=>c.url==='/auth/v1/recover')).toBe(true);
+test('administration : formules, création de client et code affiché une seule fois',async({page})=>{
+ const {calls}=await mockSupabase(page);await page.goto('/admin/');await expect(page.locator('#login-form input[type=email]')).toHaveCount(0);await page.locator('#password').fill('mot-de-passe-exemple');await page.locator('#login-button').click();await expect(page.getByRole('heading',{name:/Votre activité, en un regard/})).toBeVisible();await page.locator('.sidebar [data-view=clients]').click();await page.locator('#new-client-name').fill('Amine Client');await page.locator('#new-client-phone').fill('+213 799 00 00 00');await page.locator('#new-client-plan').selectOption(planId);await expect(page.locator('#new-client-expiry')).not.toHaveValue('');await page.locator('#create-client-button').click();await expect(page.locator('#code-reveal')).toBeVisible();await expect(page.locator('#code-value')).not.toHaveValue('');expect(calls.find(x=>x.url==='/functions/v1/qr-client-admin').body.client_name).toBe('Amine Client');await page.locator('#close-code').click();await expect(page.locator('#code-value')).toHaveValue('');await page.locator('.sidebar [data-view=plans]').click();await page.locator('#plan-name').fill('Nouvelle formule');await page.locator('#plan-price').fill('2500');await page.locator('#plan-duration').fill('60');await page.locator('#save-plan-button').click();await expect(page.getByText('Abonnement enregistré.')).toBeVisible();await expect(page.getByRole('heading',{name:'Nouvelle formule'})).toBeVisible();
 });
-test('les neuf styles SVG se décodent vers le contenu payé',async({page})=>{
+test('mobile : site et administration sans débordement',async({page})=>{
+ await page.setViewportSize({width:375,height:812});await page.goto('/');await page.getByRole('button',{name:'Ouvrir le menu'}).click();await expect(page.locator('#mobile-menu')).toHaveClass(/open/);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.goto('/admin/');await expect(page.getByText('La connexion n’est pas encore configurée.',{exact:false})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+test('récupération administrateur conserve l’e-mail uniquement pour ce parcours',async({page})=>{
+ const {calls}=await mockSupabase(page);await page.goto('/?forgot=1');await expect(page.getByRole('heading',{name:'Mot de passe oublié ?'})).toBeVisible();await page.locator('#auth-email').fill('demo@example.com');await page.getByRole('button',{name:/Envoyer le lien/}).click();await expect(page.getByText(/Si cette adresse possède un compte/)).toBeVisible();expect(calls.some(c=>c.url==='/auth/v1/recover')).toBe(true);
+});
+test('les neuf styles SVG se décodent vers le contenu créé',async({page})=>{
  const script=`import { DEFAULT_STYLE,renderSvg } from './supabase/functions/_shared/qr.js'; const all=[];for(const dots of ['square','rounded','dots'])for(const corner of ['square','rounded','circle'])all.push(renderSvg({type:'url',content:{url:'https://example.com/scan-me'},style:{...DEFAULT_STYLE,dots,corner}}));console.log(JSON.stringify(all));`;
  const svgList=JSON.parse(execFileSync(path.join(process.cwd(),'node_modules/.bin/deno'),['eval',script],{encoding:'utf8'}));await page.goto('/');await page.addScriptTag({path:require.resolve('jsqr/dist/jsQR.js')});
  for(const svg of svgList){const decoded=await page.evaluate(async s=>{const blob=new Blob([s],{type:'image/svg+xml'}),url=URL.createObjectURL(blob);try{const img=new Image();await new Promise((ok,no)=>{img.onload=ok;img.onerror=no;img.src=url});const c=document.createElement('canvas');c.width=800;c.height=800;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,800,800);ctx.drawImage(img,0,0,800,800);const pixels=ctx.getImageData(0,0,800,800);return window.jsQR(pixels.data,800,800)?.data||''}finally{URL.revokeObjectURL(url)}},svg);expect(decoded).toBe('https://example.com/scan-me')}
-});
-
-
-test('la récupération admin demande l’e-mail uniquement lorsqu’elle est nécessaire',async({page})=>{
- await mockSupabase(page);await page.goto('/admin/');await expect(page.locator('#email')).toHaveCount(0);
- const href=await page.locator('#recovery-link').getAttribute('href');expect(href).toContain('/?forgot=1');
- await page.goto('/?forgot=1');await expect(page.getByRole('heading',{name:'Mot de passe oublié ?'})).toBeVisible();await expect(page.locator('#auth-email')).toBeVisible();
 });

@@ -55,7 +55,7 @@ export function checkOrigin(request, env) {
 
 // Env vars stay in Edge Functions; no service-role or payment key reaches a web app.
 export function environment() {
-  const names = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'PUBLIC_SITE_URL', 'ORDER_ENCRYPTION_KEY', 'CHARGILY_SECRET_KEY', 'CHARGILY_MODE', 'ALLOWED_DEV_ORIGIN', 'ADMIN_EMAIL'];
+  const names = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'PUBLIC_SITE_URL', 'ORDER_ENCRYPTION_KEY', 'CHARGILY_SECRET_KEY', 'CHARGILY_MODE', 'ALLOWED_DEV_ORIGIN', 'ADMIN_EMAIL', 'CLIENT_RATE_PEPPER'];
   return Object.fromEntries(names.map(name => [name, Deno.env.get(name) || '']));
 }
 

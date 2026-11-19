@@ -1,101 +1,87 @@
-# QR Studio — QR codes personnalisés
+# QR Studio — abonnements et QR codes personnalisés
 
-Site public + espace administrateur + Supabase + APK Android WebView. L’organisation reprend la méthode du projet KARIDZ : **pages HTML autonomes**, PWA, base Supabase partagée, fichiers web embarqués dans l’APK et construction Android par GitHub Actions. Il n’y a pas de build web React/Vite.
+Site public Cloudflare Pages, administration web, Supabase et APK Android WebView construite par GitHub Actions. La structure reste celle demandée : pages HTML autonomes, fichiers web embarqués dans l’APK et base Supabase commune.
 
-> **État : configuration nécessaire.** Sans projet Supabase, compte administrateur, secrets Chargily, clé de chiffrement et tarif, les comptes et les ventes restent indisponibles. Aucun paiement réel n’est supposé testé. Le paiement par création dans le code est une hypothèse à confirmer ; le tarif et le modèle commercial restent à définir.
+## Fonctionnement commercial
+
+1. Dans **Administration → Abonnements**, créez vos formules : nom, description, tarif en DA et durée indicative. Le prix et la durée sont facultatifs. Vous pouvez publier ou masquer une formule ; aucune formule ni aucun tarif ne sont inventés.
+2. Sur le site, le client choisit une formule, indique son nom et son téléphone et, s’il le souhaite, des précisions. Le bouton ouvre WhatsApp avec un message prérempli. **Le client doit relire et envoyer ce message lui-même.** Aucune commande ou preuve de paiement n’est créée automatiquement sur le site.
+3. Vous échangez avec le client sur WhatsApp et convenez des modalités hors du site. Ensuite, dans **Clients & accès**, créez son compte avec son nom et, facultativement, son téléphone, la formule et une date de fin. Une durée préremplie peut être modifiée ou effacée ; une date vide signifie sans limite.
+4. Copiez le code secret, affiché une seule fois, et transmettez-le au client en privé. Il se connecte **avec ce seul code**, puis crée et télécharge ses QR en SVG ou PNG. En cas de perte, générez un nouveau code : l’ancien code et les anciennes sessions sont révoqués, sans supprimer les créations.
+5. À l’expiration de l’accès, le client peut toujours se connecter, consulter et télécharger ses anciens QR, mais il ne peut plus en créer. Désactiver volontairement un compte bloque l’accès complet. Les QR téléchargés sont **statiques** : ils continuent à fonctionner une fois imprimés ou distribués, même après l’expiration de l’abonnement.
+
+Les liens WhatsApp, Instagram et Facebook ainsi que l’annonce sont modifiables dans **Paramètres**. La connexion administrateur reste protégée par mot de passe ; l’e-mail n’est demandé que pour la récupération du mot de passe.
+
+> Les anciens endpoints de paiement Chargily renvoient HTTP 410. Les éventuelles anciennes tables de commandes sont conservées, mais aucun nouveau paiement n’est déclenché. Le règlement et sa vérification sont manuels, hors du site.
 
 ## Arborescence
 
 ```text
-site-public/web/                    site client HTML/CSS/JS + manifest + SW
-admin-app/web/                      administration HTML/CSS/JS + manifest + SW
-supabase/schema.sql                 tables, RLS et autorisations administrateur
-supabase/functions/qr-checkout/     création de paiement Chargily
-supabase/functions/qr-order/        vérification et export après paiement
-supabase/functions/qr-admin-auth/   connexion admin par mot de passe seul
-supabase/functions/chargily-webhook/ webhook public à signature obligatoire
-android/admin/                      application native WebView Java
-android/prepare_assets.sh           copie de l’administration dans l’APK
-scripts/prepare-web.sh              préparation Cloudflare : site + /admin/
-.github/workflows/build-apk.yml      vérifications, APK GitHub, AAB si signé
-tests/ et e2e/                      tests simulés, UI et décodage des QR
+site-public/web/                     site autonome, offres, WhatsApp, QR et espace client
+admin-app/web/                       administration autonome et responsive
+supabase/schema.sql                  schéma complet pour un nouveau projet
+supabase/migrations/                 migrations successives pour un projet existant
+supabase/functions/qr-admin-auth/    connexion admin par mot de passe seul
+supabase/functions/qr-client-auth/   connexion client par code secret
+supabase/functions/qr-client-admin/  création et renouvellement des codes par l’admin
+supabase/functions/qr-client-qr/     création et export authentifiés des QR
+android/                             application WebView et copie des assets
+scripts/                             configuration publique et contrôles
+.github/workflows/                   tests, APK/AAB, déploiement Cloudflare optionnel
+tests/ et e2e/                       tests serveur et navigateur
 ```
 
-Par rapport au dépôt de référence, les protections faibles ne sont **pas** copiées : pas de mot de passe codé en dur, pas de RLS ouverte, pas de clés secrètes dans les pages. L’APK embarque bien les fichiers comme KARIDZ mais les sert via `WebViewAssetLoader` (`https://appassets.androidplatform.net/...`) plutôt que `file://`, afin de désactiver l’accès général aux fichiers. Le site et l’administration sont réunis sous une origine Cloudflare : `/` et `/admin/`.
+## Installation Supabase
 
-## 1. Supabase et administrateur
+- Sur un projet **nouveau**, exécuter `supabase/schema.sql`. Sur un projet QR Studio existant, appliquer uniquement les migrations manquantes dans l’ordre : ne pas supprimer les données existantes.
+- Activer l’authentification par mot de passe, désactiver les inscriptions publiques si les comptes doivent être créés uniquement par l’administrateur, puis créer et confirmer l’utilisateur administrateur. Lui attribuer le rôle dans SQL Editor :
 
-1. Choisir ou créer un projet Supabase dédié. Ne pas utiliser un autre projet sans vérifier sa destination et ses données.
-2. SQL Editor : exécuter `supabase/schema.sql`. Vérifier les RLS et les privilèges si ces tables existaient déjà. `qr_studio_settings` ne contient que des informations publiques ; commandes et rôles sont protégés. Seules les fonctions serveur ont accès aux brouillons chiffrés.
-3. Activer l’authentification e-mail, créer un utilisateur et confirmer son adresse. Dans SQL Editor, attribuer explicitement ce compte :
+  ```sql
+  insert into public.qr_studio_admins(user_id)
+  select id from auth.users where email = 'votre-adresse@example.com'
+  on conflict (user_id) do nothing;
+  ```
 
-   ```sql
-   insert into public.qr_studio_admins(user_id)
-   select id from auth.users where email = 'votre-adresse@example.com'
-   on conflict (user_id) do nothing;
-   ```
+- Dans les secrets Edge Functions, configurer `PUBLIC_SITE_URL`, `ADMIN_EMAIL`, `ORDER_ENCRYPTION_KEY` (32 octets aléatoires en base64) et `CLIENT_RATE_PEPPER` (autre clé aléatoire de 32 octets en base64). Les variables `SUPABASE_URL`, `SUPABASE_ANON_KEY` et `SUPABASE_SERVICE_ROLE_KEY` sont fournies par Supabase. Aucun de ces secrets, sauf l’URL et la clé publique anon/publishable, ne doit être placé dans le site, l’APK ou Git.
+- **Sauvegarder la clé de chiffrement de manière privée et durable.** Sa perte rend les QR enregistrés indéchiffrables ; sa rotation exige une migration des données chiffrées. Dans le projet déployé, une sauvegarde chiffrée est conservée dans Supabase Vault sous `qr_studio_order_encryption_key_v1`. Un propriétaire du projet peut la récupérer depuis le SQL Editor privé ; ne jamais publier sa valeur ou la transmettre dans une conversation.
+- Dans Auth → URL Configuration, autoriser `https://VOTRE-SITE/?recovery=1`. Un SMTP adapté reste nécessaire pour une récupération administrateur fiable ; les clients n’ont pas besoin d’e-mail.
 
-   Remplacer l’adresse ; vérifier qu’une ligne est insérée. Aucun mot de passe administrateur n’est prédéfini.
-4. L’administration demande uniquement le mot de passe. Définir `ADMIN_EMAIL` comme secret Supabase Edge, avec l’adresse du compte administrateur ; elle est utilisée côté serveur et pour la récupération, et n’est pas intégrée à l’APK. La vérification est assurée par Supabase Auth et un limiteur de tentatives côté serveur.
-5. Dans Authentication → URL Configuration, choisir l’URL HTTPS du site et autoriser la redirection `https://VOTRE-SITE/?recovery=1` pour la récupération de mot de passe. Configurer un service SMTP adapté avant une mise en production : l’expéditeur Supabase par défaut est limité et ne permet pas les confirmations e-mail pour tous les clients.
-6. Récupérer **uniquement l’URL du projet et la clé anon/publishable publique** pour les sites et l’APK. Ne jamais y placer `service_role`, clés Chargily, mots de passe ou jetons GitHub/Cloudflare.
-
-## 2. Paiement Chargily (d’abord en mode test)
-
-La création de session utilise le prix stocké côté serveur, et non un montant transmis par le navigateur. Les commandes sont limitées à l’utilisateur connecté. Les brouillons (dont un éventuel mot de passe Wi-Fi) sont chiffrés par AES-GCM ; l’export n’est autorisé qu’après confirmation serveur du paiement. Le webhook Chargily vérifie HMAC-SHA256 sur le corps brut puis revérifie la session auprès de Chargily. Les environnements `test` et `live` restent séparés.
-
-Dans les **secrets des Edge Functions Supabase**, définir :
-
-- `PUBLIC_SITE_URL` : origine HTTPS du site, sans chemin final.
-- `CHARGILY_MODE` : `test` ou `live` ; commencer par `test`.
-- `CHARGILY_SECRET_KEY` : clé Chargily correspondant exactement à ce mode.
-- `ORDER_ENCRYPTION_KEY` : 32 octets aléatoires encodés en base64 (`openssl rand -base64 32`). **Conserver cette clé en lieu sûr** : sa perte rend les anciennes créations indéchiffrables ; la rotation exige une migration contrôlée.
-
-Supabase fournit automatiquement aux fonctions `SUPABASE_URL`, `SUPABASE_ANON_KEY` et `SUPABASE_SERVICE_ROLE_KEY`. Ne pas placer ces secrets dans GitHub Variables, le site ou l’APK. Déployer les fonctions depuis ce répertoire avec la CLI Supabase connectée au bon projet :
+Déployer les fonctions avec une CLI Supabase authentifiée :
 
 ```bash
-npx supabase@3.0.0 functions deploy qr-checkout --remote=VOTRE_PROJECT_REF --use-api --yes
-npx supabase@3.0.0 functions deploy qr-order --remote=VOTRE_PROJECT_REF --use-api --yes
-npx supabase@3.0.0 functions deploy qr-admin-auth --remote=VOTRE_PROJECT_REF --use-api --yes
-npx supabase@3.0.0 functions deploy chargily-webhook --remote=VOTRE_PROJECT_REF --use-api --no-verify-jwt --yes
+npx supabase@3.0.0 functions deploy qr-admin-auth qr-client-auth qr-client-admin qr-client-qr --remote=VOTRE_PROJECT_REF --use-api --yes
+npx supabase@3.0.0 functions deploy qr-checkout qr-order chargily-webhook --remote=VOTRE_PROJECT_REF --use-api --yes
 ```
 
-Le webhook et la connexion administrateur désactivent la vérification JWT de la passerelle, car ils sont appelés avant authentification. **Le webhook exige une signature valide ; la connexion admin applique une limitation de tentatives, vérifie le mot de passe auprès de Supabase Auth puis contrôle le rôle administrateur.** Les fonctions checkout et export exigent un JWT et revérifient l’utilisateur. L’URL webhook est fournie automatiquement à Chargily : `https://VOTRE-PROJET.supabase.co/functions/v1/chargily-webhook`.
+`supabase/config.toml` désactive la vérification JWT de la passerelle pour les deux fonctions de connexion et l’ancien webhook retiré. Les deux fonctions de connexion appliquent leurs propres vérifications et limites ; les autres fonctions utilisateur exigent un JWT. Les anciens endpoints renvoient uniquement 410.
 
-Dans l’administration, définir le tarif convenu, sélectionner le mode déclaré (qui doit correspondre à `CHARGILY_MODE` côté serveur) puis activer les ventes. Une incohérence entre les deux désactive la création de paiement. Tester inscription, confirmation e-mail, paiement test, webhook, actualisation et téléchargements. Passer en `live` uniquement après validation du compte Chargily et des essais. Les commandes de test ne doivent pas être considérées comme des ventes réelles.
-
-## 3. Cloudflare Pages
-
-Remplir les **valeurs publiques** dans l’environnement de construction ou les GitHub Variables : `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `PUBLIC_SITE_URL`. Les fichiers `supabase-config.js` du dépôt sont des modèles vides ; le script écrit la configuration dans une copie, jamais un secret. Un domaine Supabase personnalisé est ajouté automatiquement à la CSP de la copie.
+## Cloudflare Pages
 
 ```bash
+# Valeurs publiques dans l’environnement : SUPABASE_URL, SUPABASE_ANON_KEY, PUBLIC_SITE_URL
 bash scripts/prepare-web.sh
-# Publier .output/public sur un projet Cloudflare Pages :
 npx wrangler pages deploy .output/public --project-name VOTRE_PROJET --branch main
 ```
 
-Le workflow `cloudflare-pages.yml` est volontairement inactif tant que la variable `CLOUDFLARE_PAGES_PROJECT` et les secrets GitHub `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` ne sont pas configurés. Utiliser un jeton Cloudflare à permissions minimales, renouvelé et stocké comme secret. Les modifications GitHub ne sont donc pas publiées automatiquement tant que ce workflow n’est pas activé.
+Le workflow GitHub de déploiement est désactivé tant que la variable `CLOUDFLARE_PAGES_PROJECT` et les secrets Cloudflare requis ne sont pas configurés. Un envoi sur GitHub ne publie donc pas automatiquement le site en l’absence de ces réglages.
 
-## 4. APK via GitHub Actions
+## APK administrateur
 
-Le workflow `build-apk.yml` vérifie les pages, copie l’intégralité de `admin-app/web` dans les assets, injecte la **configuration publique**, puis construit et vérifie l’APK. Ajouter dans les GitHub Variables du dépôt QR `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `PUBLIC_SITE_URL` ; relancer l’action après modification. Sans ces valeurs l’APK affiche une page de configuration, mais l’administration ne peut pas se connecter. Télécharger l’artefact `qr-studio-admin-1` (le suffixe correspond à la tentative) depuis Actions.
+Le workflow `build-apk.yml` copie `admin-app/web` dans les assets Android, injecte uniquement la configuration publique depuis les variables GitHub, puis construit et vérifie l’APK. L’application utilise `WebViewAssetLoader`, une connexion HTTPS à Supabase et ouvre les liens externes dans le navigateur.
 
-Par défaut, seul un **APK debug de test** est créé (Android 7+, non destiné à une publication Play Store). Pour générer aussi une version release et un AAB signés, ajouter les secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` dans le dépôt QR. La signature release doit être conservée de manière sûre. Deux APK signés par des clés différentes peuvent nécessiter la désinstallation de l’ancien avant installation. Tester sur de vrais téléphones avant distribution. Le navigateur externe ouvre les liens hors de l’APK ; l’export CSV utilise le sélecteur de documents Android.
+L’artefact `qr-studio-admin-1` est un **APK debug de test** pour Android 7 ou supérieur. Pour produire aussi un APK/AAB de production, renseigner les secrets de signature `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` et `KEY_PASSWORD`. Tester sur de vrais téléphones avant distribution. Des APK signés par des clés différentes peuvent nécessiter la désinstallation de l’ancienne version.
 
-## 5. Aperçu et tests
+## Développement et contrôles
 
 ```bash
 npm ci
-npm run check             # validation HTML/CSS/JS + fonctions Deno + tests simulés
-npx playwright install chromium
-npm run test:browser      # responsive, authentification simulée, QR décodés
+npm run check
+npx playwright install --with-deps chromium
+npm run test:browser
 bash scripts/prepare-web.sh
 python3 -m http.server 5173 --directory .output/public
-# http://localhost:5173/ et http://localhost:5173/admin/
 ```
 
-Sans configuration publique, l’aperçu reste utilisable mais les ventes et la connexion sont désactivées. L’aperçu QR encode un **exemple**, pas les données du client. Les QR générés sont statiques : modifier leur destination après achat nécessiterait une fonctionnalité distincte. Testez toujours le scan avec le logo et les couleurs retenues.
+L’aperçu de l’éditeur encode un contenu d’exemple, pas les données réelles. Le QR final est généré sur le serveur après contrôle de la session et de la date de fin. Testez le scan avec les couleurs et le logo choisis.
 
-## Sécurité opérationnelle
-
-Tout jeton transmis dans une conversation doit être **révoqué puis remplacé**, même s’il semble en lecture seule. Limiter les droits des nouveaux jetons et les stocker dans les emplacements de secrets des services. Le dépôt de référence KARIDZ est consulté uniquement en lecture et sa configuration Supabase n’est pas copiée ici. Une revue de sécurité et des tests réels restent nécessaires avant ouverture commerciale.
+Les codes clients sont des secrets aléatoires longs, équivalents à des mots de passe : ne pas les publier. Supabase applique des politiques RLS, un contrôle des sessions et une limitation des tentatives ; le contenu des QR enregistrés est chiffré. Une revue de sécurité indépendante et des essais sur appareils restent recommandés.

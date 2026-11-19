@@ -1,8 +1,8 @@
 const test = (name, fn) => Deno.test(name, fn);
 import assert from 'node:assert/strict';
-import { createHmac, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { DEFAULT_STYLE, exampleSnapshot, hasGoodContrast, normalizeSnapshot, renderSvg } from '../supabase/functions/_shared/qr.js';
-import { decryptSnapshot, encryptSnapshot, verifyChargilySignature } from '../supabase/functions/_shared/crypto.js';
+import { decryptSnapshot, encryptSnapshot } from '../supabase/functions/_shared/crypto.js';
 
 const draft = (type, content, style = DEFAULT_STYLE) => ({ type, content, style });
 test('Wi-Fi escaping and standards-compliant terminator', () => {
@@ -28,7 +28,7 @@ test('rejected logos cannot inject active SVG or external references', () => {
   assert.throws(() => normalizeSnapshot(draft('url', { url: 'https://example.com' }, { ...DEFAULT_STYLE, logo: 'data:image/svg+xml;base64,AAAA' })), /logo/);
   assert.throws(() => normalizeSnapshot({ type: 'url', content: {}, style: null }), /invalides/);
 });
-test('AES-GCM binds encrypted data to the order and user', async () => {
+test('AES-GCM binds encrypted data to the QR and user', async () => {
   const secret = randomBytes(32).toString('base64');
   const snapshot = normalizeSnapshot(exampleSnapshot());
   const encrypted = await encryptSnapshot(snapshot, secret, 'order-a', 'user-a');
@@ -36,15 +36,6 @@ test('AES-GCM binds encrypted data to the order and user', async () => {
   assert.deepEqual(await decryptSnapshot(encrypted.snapshot_ciphertext, encrypted.snapshot_iv, secret, 'order-a', 'user-a'), snapshot);
   await assert.rejects(decryptSnapshot(encrypted.snapshot_ciphertext, encrypted.snapshot_iv, secret, 'order-b', 'user-a'));
 });
-test('Chargily signature covers the exact raw request bytes', async () => {
-  const key = 'test_secret'; const raw = new TextEncoder().encode('{"type": "checkout.paid"}');
-  const signature = createHmac('sha256', key).update(raw).digest('hex');
-  assert.equal(await verifyChargilySignature(key, raw, signature), true);
-  assert.equal(await verifyChargilySignature(key, new TextEncoder().encode('{"type":"checkout.paid"}'), signature), false);
-  assert.equal(await verifyChargilySignature(key, raw, 'wrong'), false);
-});
-
-
 test('un réseau Wi-Fi ouvert efface tout ancien mot de passe', () => {
   const result = normalizeSnapshot(draft('wifi', { wifiName: 'Réseau', wifiPassword: 'secret-ancien', wifiSecurity: 'nopass', hidden: false }));
   assert.equal(result.content.wifiPassword, '');
