@@ -40,22 +40,9 @@ export function dbReady(env) { return publicAuthReady(env) && !!env.SUPABASE_SER
 export function hasEncryptionKey(env) {
   try { return typeof env.ORDER_ENCRYPTION_KEY === 'string' && atob(env.ORDER_ENCRYPTION_KEY.trim()).length === 32; } catch { return false; }
 }
-export function paymentReady(env) {
-  if (!dbReady(env) || !hasEncryptionKey(env) || !env.CHARGILY_SECRET_KEY || !['test', 'live'].includes(env.CHARGILY_MODE)) return false;
-  try { siteOrigin(env); return true; } catch { return false; }
-}
-export function trustedCheckoutUrl(value) {
-  try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password && ['pay.chargily.net', 'pay.chargily.dz', 'pay.chargily.com'].includes(u.hostname); }
-  catch { return false; }
-}
-export function checkOrigin(request, env) {
-  const origin = request.headers.get('origin');
-  if (origin && origin !== siteOrigin(env)) throw new AppError(403, 'Origine non autorisée.');
-}
-
-// Env vars stay in Edge Functions; no service-role or payment key reaches a web app.
+// Les secrets restent dans les Edge Functions et ne sont jamais envoyés au navigateur.
 export function environment() {
-  const names = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'PUBLIC_SITE_URL', 'ORDER_ENCRYPTION_KEY', 'CHARGILY_SECRET_KEY', 'CHARGILY_MODE', 'ALLOWED_DEV_ORIGIN', 'ADMIN_EMAIL', 'CLIENT_RATE_PEPPER'];
+  const names = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'PUBLIC_SITE_URL', 'ORDER_ENCRYPTION_KEY', 'ALLOWED_DEV_ORIGIN', 'ADMIN_EMAIL', 'CLIENT_RATE_PEPPER'];
   return Object.fromEntries(names.map(name => [name, Deno.env.get(name) || '']));
 }
 

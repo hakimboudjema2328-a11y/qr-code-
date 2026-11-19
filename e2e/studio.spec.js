@@ -52,6 +52,12 @@ test('administration : formules, création de client et code affiché une seule 
 test('mobile : site et administration sans débordement',async({page})=>{
  await page.setViewportSize({width:375,height:812});await page.goto('/');await page.getByRole('button',{name:'Ouvrir le menu'}).click();await expect(page.locator('#mobile-menu')).toHaveClass(/open/);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.goto('/admin/');await expect(page.getByText('La connexion n’est pas encore configurée.',{exact:false})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
+test('administration mobile : gestion des clients et formules sans débordement',async({page})=>{
+ await page.setViewportSize({width:375,height:812});await mockSupabase(page);await page.goto('/admin/');await page.locator('#password').fill('mot-de-passe-exemple');await page.locator('#login-button').click();await expect(page.getByRole('heading',{name:/Votre activité, en un regard/})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.locator('.bottom-nav [data-view=clients]').click();await expect(page.getByRole('heading',{name:'Clients & accès.'})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.locator('.bottom-nav [data-view=plans]').click();await expect(page.getByRole('heading',{name:'Abonnements.'})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.locator('.bottom-nav [data-view=settings]').click();await expect(page.getByRole('heading',{name:'Vos paramètres.'})).toBeVisible();for(const width of [320,375,414]){await page.setViewportSize({width,height:812});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)}
+});
 test('récupération administrateur conserve l’e-mail uniquement pour ce parcours',async({page})=>{
  const {calls}=await mockSupabase(page);await page.goto('/?forgot=1');await expect(page.getByRole('heading',{name:'Mot de passe oublié ?'})).toBeVisible();await page.locator('#auth-email').fill('demo@example.com');await page.getByRole('button',{name:/Envoyer le lien/}).click();await expect(page.getByText(/Si cette adresse possède un compte/)).toBeVisible();expect(calls.some(c=>c.url==='/auth/v1/recover')).toBe(true);
 });

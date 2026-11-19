@@ -27,19 +27,3 @@ export async function currentUser(request, env) {
   if (!user.id || !user.email || !user.email_confirmed_at) throw new AppError(403, 'Confirmez votre adresse e-mail avant de continuer.');
   return { id: user.id, email: user.email };
 }
-export async function adminUser(request, env) {
-  const user = await currentUser(request, env);
-  if (!env.ADMIN_USER_ID || user.id !== env.ADMIN_USER_ID.trim()) throw new AppError(403, 'Accès réservé à l’administrateur.');
-  return user;
-}
-export async function getSettings(env) {
-  const rows = await database(env, 'qr_studio_settings?id=eq.1&select=id,price_dzd,checkout_enabled,payment_mode,announcement,support_email');
-  if (!rows?.[0]) throw new AppError(503, 'Les paramètres du site ne sont pas initialisés.');
-  return rows[0];
-}
-export async function getOrder(env, id, userId = null) {
-  if (!['test', 'live'].includes(env.CHARGILY_MODE)) return null;
-  const filter = `id=eq.${encodeURIComponent(id)}&payment_mode=eq.${env.CHARGILY_MODE}` + (userId ? `&user_id=eq.${encodeURIComponent(userId)}` : '');
-  const rows = await database(env, `qr_studio_orders?${filter}&select=*`);
-  return rows?.[0] || null;
-}
