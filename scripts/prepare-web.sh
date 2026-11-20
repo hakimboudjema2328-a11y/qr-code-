@@ -21,4 +21,5 @@ else:
     print('Sans SUPABASE_URL : redirection QR indisponible dans cet aperçu local.')
 PY
 test ! -e "$OUT/admin" || { echo 'Erreur : administration présente dans le site public.' >&2; exit 1; }
+test -s "$OUT/_worker.js" && test -s "$OUT/_routes.json" || { echo 'Erreur : garde des anciennes routes admin manquante.' >&2; exit 1; }
 echo "Cloudflare Pages (site client uniquement) : $OUT"
