@@ -19,7 +19,9 @@ async function localBytes(path) {
 }
 async function ready({ font = false } = {}) {
   if (!wasmReady) wasmReady = localBytes('./vendor/resvg/index_bg.wasm').then(bytes => initWasm(bytes)).catch(error => { wasmReady = null; throw error; });
-  if (font && !fontReady) fontReady = localBytes('./fonts/dm-sans.woff2').catch(error => { fontReady = null; throw error; });
+  if (font && !fontReady) fontReady = Promise.all([
+    localBytes('./fonts/dm-sans.woff2'), localBytes('./fonts/dejavu-sans.woff2')
+  ]).catch(error => { fontReady = null; throw error; });
   if (font) return (await Promise.all([wasmReady, fontReady]))[1];
   await wasmReady;
   return null;
@@ -191,10 +193,10 @@ export async function compatibleSvg(svg) {
 /** Render to an actual PNG with embedded local font, without canvas APIs. */
 export async function svgToPng(svg, width = 1800) {
   try {
-    const font = await ready({ font: true });
+    const fonts = await ready({ font: true });
     const renderer = new Resvg(svg, {
       fitTo: { mode: 'width', value: width },
-      font: { fontBuffers: [font], sansSerifFamily: 'DM Sans', defaultFontFamily: 'DM Sans' }
+      font: { fontBuffers: fonts, sansSerifFamily: 'DM Sans', defaultFontFamily: 'DM Sans' }
     });
     try {
       const image = renderer.render();

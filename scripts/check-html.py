@@ -36,7 +36,7 @@ for app in ('site-public','admin-app'):
     for name in ('vendor/supabase.js','fonts/dm-sans.woff2','fonts/outfit.woff2','supabase-config.js','sw.js'):
         if not (web/name).exists(): raise ValueError(f'{app}: fichier manquant : {name}')
     if app == 'site-public':
-        for name in ('qr-raster.js','vendor/resvg/index.mjs','vendor/resvg/index_bg.wasm',
+        for name in ('qr-raster.js','fonts/dejavu-sans.woff2','fonts/DEJAVU-LICENSE.txt','vendor/resvg/index.mjs','vendor/resvg/index_bg.wasm',
                      'vendor/webp/decode.js','vendor/webp/codec/dec/webp_dec.wasm',
                      'vendor/png/encode.js','vendor/png/codec/pkg/squoosh_png_bg.wasm'):
             if not (web/name).is_file(): raise ValueError(f'{app}: conversion PNG incomplète : {name}')

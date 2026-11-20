@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const aid='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',cid='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',planId='cccccccc-cccc-4ccc-8ccc-cccccccccccc',ver='dddddddd-dddd-4ddd-8ddd-dddddddddddd',sid='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',qrId='ffffffff-ffff-4fff-8fff-ffffffffffff';
@@ -101,6 +102,7 @@ test('espace client mobile : menus personnels, absence du marketing et pas de d�
 });
 
 const PNG=require('pngjs').PNG,jsQR=require('jsqr');
+let resvgPromise;function nodeResvg(){if(!resvgPromise)resvgPromise=(async()=>{const lib=await import('@resvg/resvg-wasm');await lib.initWasm(fs.readFileSync('node_modules/@resvg/resvg-wasm/index_bg.wasm'));return lib})();return resvgPromise}
 function readQrPixels(bytes){const png=PNG.sync.read(bytes);return {width:png.width,height:png.height,data:new Uint8ClampedArray(png.data)}}
 function decoded(pixels){
  let {width,height,data}=pixels;
@@ -113,7 +115,7 @@ async function downloaded(button){const promise=button.page().waitForEvent('down
 
 test('vrais SVG et PNG : sans logo et avec logos PNG, JPG et WebP, même si canvas est bloqué',async({page})=>{
  test.setTimeout(120000);
- const {initWasm,Resvg}=await import('@resvg/resvg-wasm');await initWasm(fs.readFileSync('node_modules/@resvg/resvg-wasm/index_bg.wasm'));
+ const {Resvg}=await nodeResvg();
  await page.addInitScript(()=>{
    HTMLCanvasElement.prototype.toBlob=function(){throw new Error('Extraction canvas bloquée')};
    HTMLCanvasElement.prototype.toDataURL=function(){throw new Error('Extraction canvas bloquée')};
@@ -160,4 +162,14 @@ test('logo JPEG issu du téléphone : orientation EXIF respectée',async({page})
  await page.locator('[data-key=url]').fill('https://example.com/orientation');await page.locator('#logo').setInputFiles('e2e/fixtures/logo-oriente.jpg');await expect(page.locator('#logo-status')).toHaveText('Logo prêt.');await page.locator('#generate-button').click();await expect(page.locator('#orders-page')).toBeVisible();
  const logo=calls.find(c=>c.url==='/functions/v1/qr-client-qr'&&c.body.action==='create').body.draft.style.logo;const image=readQrPixels(Buffer.from(logo.split(',')[1],'base64'));
  const pixel=(x,y)=>Array.from(image.data.subarray((y*image.width+x)*4,(y*image.width+x)*4+4));const top=pixel(96,40),bottom=pixel(96,150);expect(top[0]).toBeGreaterThan(180);expect(top[2]).toBeLessThan(80);expect(bottom[2]).toBeGreaterThan(180);expect(bottom[0]).toBeLessThan(80);
+});
+
+test('légende arabe conservée dans le PNG sans extraction canvas',async({page})=>{
+ test.setTimeout(60000);const {Resvg}=await nodeResvg();await mockSupabase(page,{withRealQr:true});await page.goto('/');await page.locator('.head-actions .account-label').click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();await expect(page.locator('#welcome-name')).toContainText('Client Exemple');
+ await page.locator('[data-key=url]').fill('https://example.com/arabe');await page.locator('#label').fill('مرحبا بكم');await page.locator('#qr-title').fill('QR arabe');await page.locator('#generate-button').click();const card=page.locator('.order-card').filter({has:page.getByRole('heading',{name:'QR arabe'})});await expect(card).toBeVisible();
+ const png=readQrPixels((await downloaded(card.getByRole('button',{name:'PNG ↓'}))).bytes);const svg=(await downloaded(card.getByRole('button',{name:'SVG ↓'}))).bytes.toString('utf8');expect(decoded(png)).toBe('https://example.com/arabe');
+ function reference(fonts){const r=new Resvg(svg,{fitTo:{mode:'width',value:1800},font:{fontBuffers:fonts,sansSerifFamily:'DM Sans',defaultFontFamily:'DM Sans'}}),image=r.render();try{return {width:image.width,height:image.height,data:new Uint8ClampedArray(image.pixels)}}finally{image.free();r.free()}}
+ function captionHash(p){const start=p.width*p.width*4;return createHash('sha256').update(p.data.subarray(start)).digest('hex')}
+ const dm=fs.readFileSync('site-public/web/fonts/dm-sans.woff2'),fallback=fs.readFileSync('site-public/web/fonts/dejavu-sans.woff2');
+ expect(captionHash(png)).toBe(captionHash(reference([dm,fallback])));expect(captionHash(png)).not.toBe(captionHash(reference([dm])));
 });
