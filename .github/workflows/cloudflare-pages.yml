@@ -22,7 +22,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
-          PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL || 'https://qr-studio-2328.pages.dev' }}
+          PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL || 'https://massify-qrcode.pages.dev' }}
         run: bash scripts/prepare-web.sh
       - name: Déployer sur Cloudflare Pages
         env:

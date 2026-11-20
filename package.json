@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "version": "3.0.0",
-  "description": "QR Studio : sites statiques PWA, Supabase et APK WebView embarquée",
+  "description": "Massify-qrcode : sites statiques PWA, Supabase et APK WebView embarquée",
   "scripts": {
     "test": "deno test --allow-env --allow-net=registry.npmjs.org tests/*.test.js",
     "test:browser": "playwright test",

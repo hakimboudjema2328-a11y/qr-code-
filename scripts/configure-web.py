@@ -7,7 +7,7 @@ if len(sys.argv) != 2:
 target = pathlib.Path(sys.argv[1])
 url = os.environ.get('SUPABASE_URL', '').strip().rstrip('/')
 key = os.environ.get('SUPABASE_ANON_KEY', '').strip()
-site = os.environ.get('PUBLIC_SITE_URL', 'https://qr-studio-2328.pages.dev').strip().rstrip('/')
+site = os.environ.get('PUBLIC_SITE_URL', 'https://massify-qrcode.pages.dev').strip().rstrip('/')
 def safe_origin(value):
     if not value: return ''
     u = urlsplit(value)

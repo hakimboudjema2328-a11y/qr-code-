@@ -9,9 +9,9 @@ const aid='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',cid='bbbbbbbb-bbbb-4bbb-8bbb-bb
 const encode=x=>Buffer.from(JSON.stringify(x)).toString('base64url');
 function session(id,metadata={}){const user={id,aud:'authenticated',role:'authenticated',email:'not-visible@example.invalid',email_confirmed_at:'2026-01-01',app_metadata:metadata};return {access_token:encode({alg:'HS256',typ:'JWT'})+'.'+encode({sub:id,session_id:sid,app_metadata:metadata,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})+'.c2lnbmF0dXJl',refresh_token:'mock-refresh-'+id,expires_in:3600,token_type:'bearer',user}}
 const adminSession=session(aid),clientSession=session(cid,{qr_access_version:ver});
-function actualSvg(draft){
- const script=`import {renderSvg} from './supabase/functions/_shared/qr.js';const draft=await new Response(Deno.stdin.readable).json();console.log(renderSvg(draft));`;
- return execFileSync(path.join(process.cwd(),'node_modules/.bin/deno'),['eval',script],{input:JSON.stringify(draft),encoding:'utf8',maxBuffer:5_000_000}).trim();
+function actualQr(draft){
+ const script=`import {renderQr} from './supabase/functions/_shared/qr.js';const draft=await new Response(Deno.stdin.readable).json();console.log(JSON.stringify(renderQr(draft)));`;
+ return JSON.parse(execFileSync(path.join(process.cwd(),'node_modules/.bin/deno'),['eval',script],{input:JSON.stringify(draft),encoding:'utf8',maxBuffer:5_000_000}));
 }
 async function mockSupabase(page,{withPlan=true,expired=false,withQr=false,withRealQr=false,legacyWebp=false}={}){
  const snapshots=new Map(),calls=[],plans=withPlan?[{id:planId,name:'Formule Test',description:'Une formule de démonstration',price_dzd:1250,duration_days:30,is_active:true,position:0,created_at:'2026-01-01'}]:[],clients=[{user_id:cid,client_name:'Client Exemple',phone:'+213 555 00 00 00',plan_id:planId,plan_name:'Formule Test',expires_at:expired?'2024-01-01T00:00:00Z':null,is_active:true,created_at:'2026-01-01'}],qrs=withQr?[{id:qrId,user_id:cid,title:'Ancien QR',qr_type:'url',created_at:'2026-01-01'}]:[];
@@ -39,7 +39,8 @@ async function mockSupabase(page,{withPlan=true,expired=false,withQr=false,withR
   else if(u.pathname==='/functions/v1/qr-client-qr'){
     if(sent.action==='create'){snapshots.set(sent.id,sent.draft);qrs.unshift({id:sent.id,user_id:cid,title:sent.title||'Lien web',qr_type:sent.draft.type,created_at:'2026-01-01'})}
     const example={type:'url',content:{url:'https://example.com/ancien'},style:{foreground:'#24203f',background:'#ffffff',dots:'rounded',corner:'rounded',frame:true,label:'SCANNEZ-MOI',logo:''}};
-    body={id:sent.id,svg:withRealQr?actualSvg(snapshots.get(sent.id)||example):'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/></svg>'}
+    const rendered=withRealQr?actualQr(snapshots.get(sent.id)||example):{svg:'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/></svg>'};
+    body={id:sent.id,...rendered}
   }
   else return route.fulfill({status:404,headers,body:'{}'});
   return route.fulfill({status:200,headers,body:JSON.stringify(body)});
@@ -172,4 +173,65 @@ test('légende arabe conservée dans le PNG sans extraction canvas',async({page}
  function captionHash(p){const start=p.width*p.width*4;return createHash('sha256').update(p.data.subarray(start)).digest('hex')}
  const dm=fs.readFileSync('site-public/web/fonts/dm-sans.woff2'),fallback=fs.readFileSync('site-public/web/fonts/dejavu-sans.woff2');
  expect(captionHash(png)).toBe(captionHash(reference([dm,fallback])));expect(captionHash(png)).not.toBe(captionHash(reference([dm])));
+});
+
+test('Massify-qrcode : nom du site, de l’administration et des applications installables',async({page})=>{
+ await mockSupabase(page);await page.goto('/');await expect(page).toHaveTitle(/Massify-qrcode/);await expect(page.locator('header .brand')).toContainText('Massify-qrcode');
+ const manifest=await page.evaluate(async()=>await (await fetch('/manifest.json')).json());expect(manifest.name).toContain('Massify-qrcode');expect(manifest.short_name).toBe('Massify-qrcode');
+ await page.goto('/admin/');await expect(page).toHaveTitle(/Massify-qrcode/);await expect(page.locator('.brand').first()).toContainText('Massify-qrcode');
+ const admin=await page.evaluate(async()=>await (await fetch('/admin/manifest.json')).json());expect(admin.name).toContain('Massify-qrcode');
+});
+
+const setLogoSize=(page,size)=>page.locator('#logo-size').evaluate((el,n)=>{el.value=String(n);el.dispatchEvent(new Event('input',{bubbles:true}))},size);
+const svgImageSide=svg=>Number(svg.match(/<image[^>]+width="([\d.]+)"/)[1]);
+const svgMatrixSide=svg=>Number(svg.match(/^<svg[^>]*width="([\d.]+)"/)[1])-80;
+
+test('curseur du logo : aperçu, enregistrement et exports SVG/PNG cohérents',async({page})=>{
+ test.setTimeout(120000);const {Resvg}=await nodeResvg();const {calls}=await mockSupabase(page,{withRealQr:true});
+ await page.goto('/');await expect(page.locator('#logo-size')).toBeDisabled();await page.locator('.head-actions .account-label').click();
+ await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();await expect(page.locator('#welcome-name')).toContainText('Client Exemple');
+ await page.locator('#logo').setInputFiles('e2e/fixtures/logo-small.png');await expect(page.locator('#logo-status')).toHaveText('Logo prêt.');await expect(page.locator('#logo-size')).toBeEnabled();
+ let firstPreview=0,previousSvg='';
+ for(const [size,title] of [[8,'Petit logo'],[22,'Grand logo']]){
+  await setLogoSize(page,size);await expect(page.locator('#logo-size-value')).toHaveText(size+' %');
+  const preview=Number(await page.locator('#preview-qr image').getAttribute('width'));if(size===8)firstPreview=preview;else expect(preview).toBeGreaterThan(firstPreview);
+  const target='https://example.com/logo-'+size;await page.locator('[data-key=url]').fill(target);await page.locator('#qr-title').fill(title);await page.locator('#generate-button').click();
+  const card=page.locator('.order-card').filter({has:page.getByRole('heading',{name:title,exact:true})});await expect(card).toBeVisible();
+  const svg=(await downloaded(card.getByRole('button',{name:'SVG ↓'}))).bytes.toString('utf8');expect(svgImageSide(svg)/svgMatrixSide(svg)).toBeCloseTo(size/100,5);
+  const r=new Resvg(svg,{fitTo:{mode:'width',value:900}}),im=r.render();try{expect(decoded({width:im.width,height:im.height,data:new Uint8ClampedArray(im.pixels)})).toBe(target)}finally{im.free();r.free()}
+  const png=readQrPixels((await downloaded(card.getByRole('button',{name:'PNG ↓'}))).bytes);expect(decoded(png)).toBe(target);expect(hasRedLogo(png)).toBe(true);
+  if(size===22)previousSvg=svg;
+  await page.getByRole('button',{name:'← Retour à la création'}).click();
+ }
+ const creations=calls.filter(c=>c.url==='/functions/v1/qr-client-qr'&&c.body.action==='create');expect(creations.map(c=>c.body.draft.style.logoSize)).toEqual([8,22]);
+ await page.reload();await expect(page.locator('#welcome-name')).toContainText('Client Exemple');await page.locator('nav[data-client-only] button[data-nav-view=orders]').click();
+ const saved=page.locator('.order-card').filter({has:page.getByRole('heading',{name:'Grand logo',exact:true})});await expect(saved).toBeVisible();expect((await downloaded(saved.getByRole('button',{name:'SVG ↓'}))).bytes.toString('utf8')).toBe(previousSvg);
+});
+
+test('contenu dense : la réduction automatique du logo est annoncée au client',async({page})=>{
+ test.setTimeout(90000);const {calls}=await mockSupabase(page,{withRealQr:true});await page.goto('/');await page.locator('.head-actions .account-label').click();
+ await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();await expect(page.locator('#welcome-name')).toContainText('Client Exemple');
+ await page.locator('#logo').setInputFiles('e2e/fixtures/logo-small.png');await expect(page.locator('#logo-status')).toHaveText('Logo prêt.');await setLogoSize(page,22);
+ const target='https://example.com/'+ 'x'.repeat(500);await page.locator('[data-key=url]').fill(target);await page.locator('#qr-title').fill('QR dense');await page.locator('#generate-button').click();
+ await expect(page.locator('#order-message')).toContainText('Le logo a été ajusté');const card=page.locator('.order-card').filter({has:page.getByRole('heading',{name:'QR dense',exact:true})});await expect(card).toBeVisible();
+ const svg=(await downloaded(card.getByRole('button',{name:'SVG ↓'}))).bytes.toString('utf8');expect(svgImageSide(svg)/svgMatrixSide(svg)).toBeLessThan(.22);
+ const png=readQrPixels((await downloaded(card.getByRole('button',{name:'PNG ↓'}))).bytes);expect(decoded(png)).toBe(target);
+ expect(calls.find(c=>c.url==='/functions/v1/qr-client-qr'&&c.body.action==='create').body.draft.style.logoSize).toBe(22);
+});
+
+test('lecture de logos petits et grands sur plusieurs contenus et styles',async()=>{
+ test.setTimeout(120000);const {Resvg}=await nodeResvg(),logo='data:image/png;base64,'+fs.readFileSync('e2e/fixtures/logo-small.png').toString('base64');
+ const sources=[
+  {type:'url',content:{url:'https://x.co/'}},{type:'url',content:{url:'https://example.com/scan-me'}},
+  ...[50,100,230,500,680].map(n=>({type:'url',content:{url:'https://example.com/'+'x'.repeat(n)}})),
+  {type:'wifi',content:{wifiName:'Café Salon',wifiPassword:'MotDePasse123',wifiSecurity:'WPA',hidden:false}},
+  {type:'contact',content:{name:'Samir Client',phone:'+213555001122',email:'client@example.com',company:'Exemple',website:'https://example.com'}}
+ ];
+ const drafts=[];for(const source of sources)for(const size of [8,16,22])for(const dots of ['square','rounded','dots'])drafts.push({...source,style:{foreground:'#24203f',background:'#ffffff',dots,corner:dots==='dots'?'circle':dots,frame:false,label:'SCANNEZ-MOI',logo,logoSize:size}});
+ const script=`import {normalizeSnapshot,renderQr} from './supabase/functions/_shared/qr.js';const drafts=await new Response(Deno.stdin.readable).json();console.log(JSON.stringify(drafts.map(d=>({payload:normalizeSnapshot(d).payload,...renderQr(d)}))));`;
+ const qr=JSON.parse(execFileSync(path.join(process.cwd(),'node_modules/.bin/deno'),['eval',script],{input:JSON.stringify(drafts),encoding:'utf8',maxBuffer:64_000_000}));
+ for(let i=0;i<qr.length;i++){
+  const r=new Resvg(qr[i].svg,{fitTo:{mode:'width',value:900}}),im=r.render();
+  try{expect(decoded({width:im.width,height:im.height,data:new Uint8ClampedArray(im.pixels)}),`${drafts[i].type}, taille ${drafts[i].style.logoSize}, style ${drafts[i].style.dots}`).toBe(qr[i].payload)}finally{im.free();r.free()}
+ }
 });

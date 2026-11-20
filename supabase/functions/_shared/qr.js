@@ -1,9 +1,10 @@
 import QRCode from 'npm:qrcode@1.5.4/lib/core/qrcode.js';
+import { LOGO_DEFAULT_SIZE, LOGO_MAX_SIZE, LOGO_MIN_SIZE, planCenteredLogo } from './logo-layout.js';
 
 export const QR_TYPES = ['url', 'text', 'whatsapp', 'wifi', 'email', 'phone', 'sms', 'contact'];
 export const DEFAULT_STYLE = Object.freeze({
   foreground: '#24203f', background: '#ffffff', dots: 'rounded', corner: 'rounded',
-  frame: true, label: 'SCANNEZ-MOI', logo: ''
+  frame: true, label: 'SCANNEZ-MOI', logo: '', logoSize: LOGO_DEFAULT_SIZE
 });
 export const DEFAULT_DRAFT = Object.freeze({
   type: 'url',
@@ -126,6 +127,14 @@ export function normalizeSnapshot(input, { enforceContrast = true } = {}) {
   if (style.logo && (!/^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(style.logo) || style.logo.length > 270000)) {
     throw new Error('Le logo doit être un PNG, JPG ou WebP de 200 Ko maximum.');
   }
+  // Old encrypted snapshots do not have this field: leave it absent so their
+  // previously exported design remains unchanged. New drafts always include it.
+  if (Object.hasOwn(source, 'logoSize')) {
+    if (!Number.isInteger(source.logoSize) || source.logoSize < LOGO_MIN_SIZE || source.logoSize > LOGO_MAX_SIZE) {
+      throw new Error(`La taille du logo doit être comprise entre ${LOGO_MIN_SIZE} % et ${LOGO_MAX_SIZE} %.`);
+    }
+    style.logoSize = source.logoSize;
+  }
   return { type, content, style, payload };
 }
 
@@ -133,12 +142,19 @@ function escapeXml(value) {
   return String(value).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
 }
 
-/** Generate the same styles for the dummy preview and the authenticated, server-side SVG export. */
-export function renderSvg(raw, { preview = false } = {}) {
+/** Generate the authenticated SVG and, when applicable, the actual logo size. */
+export function renderQr(raw, { preview = false } = {}) {
   const snapshot = normalizeSnapshot(raw, { enforceContrast: !preview });
   const payload = preview ? 'https://example.com/qr-studio-preview' : snapshot.payload;
   const { style } = snapshot;
-  const matrix = QRCode.create(payload, { errorCorrectionLevel: 'H' }).modules;
+  let qr = QRCode.create(payload, { errorCorrectionLevel: 'H' });
+  let logoSizeApplied = null;
+  if (style.logo && style.logoSize !== undefined) {
+    const planned = planCenteredLogo(payload, qr, style.logoSize);
+    qr = planned.qr;
+    logoSizeApplied = planned.logoSizeApplied;
+  }
+  const matrix = qr.modules;
   const count = matrix.size;
   const unit = 10;
   const quiet = 4 * unit;
@@ -151,8 +167,10 @@ export function renderSvg(raw, { preview = false } = {}) {
   for (let row = 0; row < count; row++) for (let col = 0; col < count; col++) {
     if (!matrix.get(row, col) || isFinder(row, col)) continue;
     const x = quiet + col * unit, y = quiet + row * unit;
-    if (style.dots === 'dots') parts.push(`<circle cx="${x + 5}" cy="${y + 5}" r="4.95"/>`);
-    else parts.push(`<rect x="${x}" y="${y}" width="${unit}" height="${unit}" rx="${style.dots === 'rounded' ? 2.4 : 0}"/>`);
+    // Nearly circular modules touch on their flat edges, improving sampling by
+    // common readers. Legacy snapshots retain their original circle geometry.
+    if (style.dots === 'dots' && style.logoSize === undefined) parts.push(`<circle cx="${x + 5}" cy="${y + 5}" r="4.95"/>`);
+    else parts.push(`<rect x="${x}" y="${y}" width="${unit}" height="${unit}" rx="${style.dots === 'dots' ? 4 : style.dots === 'rounded' ? 2.4 : 0}"/>`);
   }
   parts.push('</g>');
   const positions = [[0, 0], [count - 7, 0], [0, count - 7]];
@@ -166,7 +184,8 @@ export function renderSvg(raw, { preview = false } = {}) {
       `<rect x="${x + 20}" y="${y + 20}" width="30" height="30" rx="${inner}" fill="${style.foreground}"/>`);
   }
   if (style.logo) {
-    const s = Math.min(count * unit * 0.16, 80), p = (size - s) / 2;
+    const s = logoSizeApplied === null ? Math.min(count * unit * 0.16, 80) : count * unit * logoSizeApplied / 100;
+    const p = (size - s) / 2;
     parts.push(`<rect x="${p - 5}" y="${p - 5}" width="${s + 10}" height="${s + 10}" rx="8" fill="${style.background}"/>`,
       `<image href="${style.logo}" x="${p}" y="${p}" width="${s}" height="${s}" preserveAspectRatio="xMidYMid meet"/>`);
   }
@@ -179,8 +198,9 @@ export function renderSvg(raw, { preview = false } = {}) {
       `<text x="${size / 2}" y="${size * 0.535}" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="${size * 0.038}" letter-spacing="2" fill="#5948d8">APERÇU</text></g>`);
   }
   parts.push('</svg>');
-  return parts.join('');
+  return { svg: parts.join(''), logoSizeApplied, logoSizeRequested: style.logo && style.logoSize !== undefined ? style.logoSize : null };
 }
+export function renderSvg(raw, options = {}) { return renderQr(raw, options).svg; }
 export function exampleSnapshot(style = DEFAULT_STYLE) {
   return { type: 'url', content: { url: 'https://example.com/qr-studio-preview' }, style };
 }

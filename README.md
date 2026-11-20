@@ -1,4 +1,4 @@
-# QR Studio — abonnements et QR codes personnalisés
+# Massify-qrcode — abonnements et QR codes personnalisés
 
 Site public Cloudflare Pages, administration web, Supabase et APK Android WebView construite par GitHub Actions. La structure reste celle demandée : pages HTML autonomes, fichiers web embarqués dans l’APK et base Supabase commune.
 
@@ -33,7 +33,7 @@ tests/ et e2e/                       tests serveur et navigateur
 
 ## Installation Supabase
 
-- Sur un projet **nouveau**, exécuter `supabase/schema.sql`. Sur un projet QR Studio existant, appliquer uniquement les migrations manquantes dans l’ordre : ne pas supprimer les données existantes.
+- Sur un projet **nouveau**, exécuter `supabase/schema.sql`. Sur un projet Massify-qrcode existant, appliquer uniquement les migrations manquantes dans l’ordre : ne pas supprimer les données existantes.
 - Activer l’authentification par mot de passe, désactiver les inscriptions publiques si les comptes doivent être créés uniquement par l’administrateur, puis créer et confirmer l’utilisateur administrateur. Lui attribuer le rôle dans SQL Editor :
 
   ```sql
@@ -42,7 +42,7 @@ tests/ et e2e/                       tests serveur et navigateur
   on conflict (user_id) do nothing;
   ```
 
-- Dans les secrets Edge Functions, configurer `PUBLIC_SITE_URL`, `ADMIN_EMAIL`, `ORDER_ENCRYPTION_KEY` (32 octets aléatoires en base64) et `CLIENT_RATE_PEPPER` (autre clé aléatoire de 32 octets en base64). Les variables `SUPABASE_URL`, `SUPABASE_ANON_KEY` et `SUPABASE_SERVICE_ROLE_KEY` sont fournies par Supabase. Aucun de ces secrets, sauf l’URL et la clé publique anon/publishable, ne doit être placé dans le site, l’APK ou Git.
+- Dans les secrets Edge Functions, configurer `PUBLIC_SITE_URL`, `ADMIN_EMAIL`, `ORDER_ENCRYPTION_KEY` (32 octets aléatoires en base64) et `CLIENT_RATE_PEPPER` (autre clé aléatoire de 32 octets en base64). En cas de changement de domaine, `EXTRA_SITE_ORIGINS` peut contenir une liste d’anciennes origines HTTPS exactes séparées par des virgules, pour que les sessions ouvertes sur l’ancien site restent utilisables pendant la transition. Les variables `SUPABASE_URL`, `SUPABASE_ANON_KEY` et `SUPABASE_SERVICE_ROLE_KEY` sont fournies par Supabase. Aucun de ces secrets, sauf l’URL et la clé publique anon/publishable, ne doit être placé dans le site, l’APK ou Git.
 - **Sauvegarder la clé de chiffrement de manière privée et durable.** Sa perte rend les QR enregistrés indéchiffrables ; sa rotation exige une migration des données chiffrées. Dans le projet déployé, une sauvegarde chiffrée est conservée dans Supabase Vault sous `qr_studio_order_encryption_key_v1`. Un propriétaire du projet peut la récupérer depuis le SQL Editor privé ; ne jamais publier sa valeur ou la transmettre dans une conversation.
 - Dans Auth → URL Configuration, autoriser `https://VOTRE-SITE/?recovery=1`. Un SMTP adapté reste nécessaire pour une récupération administrateur fiable ; les clients n’ont pas besoin d’e-mail.
 
@@ -82,7 +82,7 @@ bash scripts/prepare-web.sh
 python3 -m http.server 5173 --directory .output/public
 ```
 
-L’aperçu de l’éditeur encode un contenu d’exemple, pas les données réelles. Le QR final est généré sur le serveur après contrôle de la session et de la date de fin. Testez le scan avec les couleurs et le logo choisis.
+L’aperçu de l’éditeur encode un contenu d’exemple, pas les données réelles. Le QR final est généré sur le serveur après contrôle de la session et de la date de fin. La taille souhaitée du logo est réglable de 8 % à 22 % de la largeur de la grille QR ; elle peut être réduite automatiquement pour préserver les motifs de repérage et une marge de correction des erreurs. Dans ce cas, la taille appliquée est annoncée après la création. La correction élevée ne garantit pas la lecture dans toutes les conditions : testez le QR téléchargé sur plusieurs téléphones, et en taille réelle avant impression.
 
 Après connexion par code, le client arrive dans son espace personnel : création, QR enregistrés, abonnement et déconnexion. Une session restaurée conserve cet affichage ; un abonnement expiré bloque seulement les nouvelles créations.
 

@@ -97,7 +97,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void print() {
             runOnUiThread(() -> {
                 PrintManager manager = (PrintManager) getSystemService(PRINT_SERVICE);
-                if (manager != null) manager.print("QR Studio", webView.createPrintDocumentAdapter("QR Studio"), null);
+                if (manager != null) manager.print("Massify-qrcode", webView.createPrintDocumentAdapter("Massify-qrcode"), null);
             });
         }
     }

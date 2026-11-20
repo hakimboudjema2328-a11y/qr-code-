@@ -42,15 +42,24 @@ export function hasEncryptionKey(env) {
 }
 // Les secrets restent dans les Edge Functions et ne sont jamais envoyés au navigateur.
 export function environment() {
-  const names = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'PUBLIC_SITE_URL', 'ORDER_ENCRYPTION_KEY', 'ALLOWED_DEV_ORIGIN', 'ADMIN_EMAIL', 'CLIENT_RATE_PEPPER'];
+  const names = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'PUBLIC_SITE_URL', 'EXTRA_SITE_ORIGINS', 'ORDER_ENCRYPTION_KEY', 'ALLOWED_DEV_ORIGIN', 'ADMIN_EMAIL', 'CLIENT_RATE_PEPPER'];
   return Object.fromEntries(names.map(name => [name, Deno.env.get(name) || '']));
+}
+
+function extraSiteOrigins(value) {
+  return String(value || '').split(',').map(item => {
+    try {
+      const u = new URL(item.trim());
+      return u.protocol === 'https:' && !u.username && !u.password && u.pathname === '/' && !u.search && !u.hash ? u.origin : null;
+    } catch { return null; }
+  }).filter(Boolean);
 }
 
 export async function userEndpoint(request, env, run, { allowApp = false } = {}) {
   let cors = {};
   try {
     const origin = request.headers.get('origin');
-    const allowed = [siteOrigin(env), env.ALLOWED_DEV_ORIGIN, allowApp ? 'https://appassets.androidplatform.net' : null].filter(Boolean);
+    const allowed = [siteOrigin(env), ...extraSiteOrigins(env.EXTRA_SITE_ORIGINS), env.ALLOWED_DEV_ORIGIN, allowApp ? 'https://appassets.androidplatform.net' : null].filter(Boolean);
     if (origin && !allowed.includes(origin)) throw new AppError(403, 'Origine non autorisée.');
     cors = {
       'Access-Control-Allow-Origin': origin || siteOrigin(env),

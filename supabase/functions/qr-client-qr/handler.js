@@ -2,7 +2,7 @@ import { AppError, hasEncryptionKey, isUuid, json, readJson, userEndpoint } from
 import { requireClient } from '../_shared/auth-api.js';
 import { database } from '../_shared/supabase.js';
 import { encryptSnapshot, decryptSnapshot } from '../_shared/crypto.js';
-import { normalizeSnapshot, renderSvg } from '../_shared/qr.js';
+import { normalizeSnapshot, renderQr } from '../_shared/qr.js';
 const labels={url:'Lien web',text:'Texte',whatsapp:'WhatsApp',wifi:'Wi-Fi',email:'E-mail',phone:'Téléphone',sms:'SMS',contact:'Contact'};
 async function existing(env,id,userId){
   const rows=await database(env,`qr_studio_client_qrs?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=id,snapshot_ciphertext,snapshot_iv`);
@@ -10,7 +10,7 @@ async function existing(env,id,userId){
 }
 async function svgFor(env,row,userId){
   const snapshot=await decryptSnapshot(row.snapshot_ciphertext,row.snapshot_iv,env.ORDER_ENCRYPTION_KEY,row.id,userId);
-  return renderSvg(snapshot);
+  return renderQr(snapshot);
 }
 export async function clientQrHandler(request,env){
   return userEndpoint(request,env,async()=>{
@@ -20,13 +20,13 @@ export async function clientQrHandler(request,env){
     if (body.action==='export') {
       const row=await existing(env,body.id,uid);
       if (!row) throw new AppError(404,'QR code introuvable.');
-      return json({id:row.id,svg:await svgFor(env,row,uid)});
+      return json({id:row.id,...await svgFor(env,row,uid)});
     }
     if (body.action==='create') {
       const found=await existing(env,body.id,uid);
-      if (found) return json({id:found.id,svg:await svgFor(env,found,uid)});
-      let snapshot,svg;
-      try {snapshot=normalizeSnapshot(body.draft);svg=renderSvg(snapshot)}
+      if (found) return json({id:found.id,...await svgFor(env,found,uid)});
+      let snapshot,rendered;
+      try {snapshot=normalizeSnapshot(body.draft);rendered=renderQr(snapshot)}
       catch(e){throw new AppError(400,e?.message||'QR code invalide.')}
       let title=typeof body.title==='string'?body.title.replace(/[\r\n\t]/g,' ').trim():'';
       if (!title) title=labels[snapshot.type]||'QR code';
@@ -38,9 +38,9 @@ export async function clientQrHandler(request,env){
       if (result==='expired') throw new AppError(403,'Votre abonnement a expiré. Contactez-nous pour le renouveler.');
       if (result==='account_unavailable') throw new AppError(403,'Accès désactivé ou session terminée. Contactez-nous.');
       if (result==='rate_limited') throw new AppError(429,'Trop de créations à la fois. Réessayez dans une minute.');
-      if (result==='exists') {const row=await existing(env,body.id,uid);if (!row) throw new AppError(503,'QR temporairement indisponible.');return json({id:row.id,svg:await svgFor(env,row,uid)})}
+      if (result==='exists') {const row=await existing(env,body.id,uid);if (!row) throw new AppError(503,'QR temporairement indisponible.');return json({id:row.id,...await svgFor(env,row,uid)})}
       if (result!=='ok') throw new AppError(503,'Création temporairement indisponible.');
-      return json({id:body.id,svg});
+      return json({id:body.id,...rendered});
     }
     throw new AppError(400,'Action inconnue.');
   });

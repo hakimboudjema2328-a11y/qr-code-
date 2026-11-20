@@ -40,3 +40,36 @@ Deno.test('QR : accès au seul propriétaire, expiration bloquant seulement les 
   throw Error('unexpected '+u.pathname)};
  try{let r=await clientQrHandler(req({action:'create',id:qrId,title:'Ma page',draft:clientDraft}),env);assert.equal(r.status,200);let result=await r.json();assert.match(result.svg,/^<svg/);assert.ok(!stored.snapshot_ciphertext.includes('example.com'));expiry=true;r=await clientQrHandler(req({action:'export',id:qrId}),env);assert.equal(r.status,200);assert.match((await r.json()).svg,/^<svg/);stored=null;r=await clientQrHandler(req({action:'create',id:qrId,draft:clientDraft}),env);assert.equal(r.status,403);assert.match((await r.json()).error,/expiré/);account=false;r=await clientQrHandler(req({action:'export',id:qrId}),env);assert.equal(r.status,403);account=true;r=await clientQrHandler(req({action:'export',id:qrId},jwt(adminId)),env);assert.equal(r.status,403)}finally{globalThis.fetch=orig}
 });
+
+Deno.test('CORS : nouvelle et ancienne origines exactes, mais aucune origine arbitraire', async () => {
+ const {userEndpoint} = await import('../supabase/functions/_shared/common.js');
+ const config={...env,PUBLIC_SITE_URL:'https://massify-qrcode.pages.dev',EXTRA_SITE_ORIGINS:'https://qr-studio-2328.pages.dev, https://invalid.example/path'};
+ for(const origin of ['https://massify-qrcode.pages.dev','https://qr-studio-2328.pages.dev']){
+  const request=new Request('https://mock.supabase.co/functions/v1/test',{method:'OPTIONS',headers:{origin}});
+  const result=await userEndpoint(request,config,()=>new Response('ok'));
+  assert.equal(result.status,204);assert.equal(result.headers.get('access-control-allow-origin'),origin);
+ }
+ for(const origin of ['https://evil.example','https://massify-qrcode.pages.dev.evil.example','https://invalid.example']){
+  const request=new Request('https://mock.supabase.co/functions/v1/test',{method:'OPTIONS',headers:{origin}});
+  assert.equal((await userEndpoint(request,config,()=>new Response('ok'))).status,403);
+ }
+});
+
+Deno.test('taille du logo enregistrée dans le QR chiffré et conservée à l’export',async()=>{
+ const {decryptSnapshot}=await import('../supabase/functions/_shared/crypto.js');
+ const orig=globalThis.fetch;let stored=null,expired=false;
+ globalThis.fetch=async(url,opts={})=>{const u=new URL(url),body=opts.body?JSON.parse(opts.body):null;
+  if(u.pathname.endsWith('/auth/v1/user'))return response({id:uid,email:'synthetic@example.invalid',email_confirmed_at:'2026'});
+  if(u.pathname.endsWith('/qr_studio_clients'))return response([{user_id:uid,client_name:'Client',plan_name:'',is_active:true,expires_at:null}]);
+  if(u.pathname.endsWith('/qr_studio_client_qrs'))return response(stored?[stored]:[]);
+  if(u.pathname.endsWith('/rpc/qr_create_client_qr')){if(expired)return response('expired');stored={id:body.p_id,snapshot_ciphertext:body.p_ciphertext,snapshot_iv:body.p_iv};return response('ok')}
+  throw Error('unexpected '+u.pathname)};
+ try{
+  const draft={...clientDraft,style:{...DEFAULT_STYLE,logo:'data:image/png;base64,AAAA',logoSize:22}};
+  let r=await clientQrHandler(req({action:'create',id:qrId,title:'Logo',draft}),env);assert.equal(r.status,200);
+  const created=await r.json();assert.equal(created.logoSizeRequested,22);assert.equal(created.logoSizeApplied,22);
+  const snapshot=await decryptSnapshot(stored.snapshot_ciphertext,stored.snapshot_iv,env.ORDER_ENCRYPTION_KEY,qrId,uid);assert.equal(snapshot.style.logoSize,22);
+  expired=true;r=await clientQrHandler(req({action:'export',id:qrId}),env);assert.equal(r.status,200);
+  const exported=await r.json();assert.equal(exported.svg,created.svg);assert.equal(exported.logoSizeApplied,22);
+ }finally{globalThis.fetch=orig}
+});
