@@ -63,7 +63,7 @@ bash scripts/prepare-web.sh
 npx wrangler pages deploy .output/public --project-name VOTRE_PROJET --branch main
 ```
 
-Le workflow GitHub de déploiement est désactivé tant que la variable `CLOUDFLARE_PAGES_PROJECT` et les secrets Cloudflare requis ne sont pas configurés. Un envoi sur GitHub ne publie donc pas automatiquement le site en l’absence de ces réglages.
+Le workflow GitHub de déploiement est désactivé tant que la variable `CLOUDFLARE_PAGES_PROJECT` et les secrets Cloudflare requis ne sont pas configurés. Renseigner `CLOUDFLARE_PAGES_PROJECT=massify-qrcode` et `PUBLIC_SITE_URL=https://massify-qrcode.pages.dev` dans les variables du dépôt. Le workflow refuse l’ancien projet, réservé à la redirection.
 
 Pour conserver les anciens liens après le changement de domaine, le dossier `legacy-redirect/` peut être publié uniquement sur l’ancien projet Pages : il redirige vers `massify-qrcode.pages.dev` en conservant les chemins et les paramètres. Ne pas le publier sur le nouveau projet. Les sessions du navigateur étant liées au domaine, les clients et administrateurs peuvent devoir se reconnecter sur la nouvelle adresse ; les comptes et QR enregistrés ne sont pas modifiés.
 

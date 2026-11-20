@@ -12,7 +12,8 @@ permissions:
   contents: read
 jobs:
   deploy:
-    if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' }}
+    # L'ancien projet est réservé à la redirection, ne jamais y publier le site complet.
+    if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && vars.CLOUDFLARE_PAGES_PROJECT != 'qr-studio-2328' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
