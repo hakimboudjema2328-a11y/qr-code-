@@ -1,0 +1,56 @@
+name: Construire l’application Windows administrateur
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'windows/**'
+      - 'admin-app/web/**'
+      - 'scripts/**'
+      - '.github/workflows/build-windows.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Préparer l’interface admin embarquée
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL || 'https://massify-qrcode.pages.dev' }}
+        run: python scripts/prepare-windows.py
+      - name: Construire un EXE autonome pour Windows 64 bits
+        run: dotnet publish windows/Admin/MassifyAdmin.csproj -c Release -r win-x64 --self-contained true -o windows-deliverables -p:DebugType=None -p:DebugSymbols=false
+      - name: Vérifier l’EXE et ses ressources embarquées
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'windows-deliverables/Massify-qrcode-Admin.exe').Path
+          $p = Start-Process -FilePath $exe -ArgumentList '--self-test' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "L'autotest de l'EXE a échoué : $($p.ExitCode)" }
+          Get-FileHash $exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  Massify-qrcode-Admin.exe" } | Set-Content 'windows-deliverables/SHA256SUMS.txt'
+      - name: Essai de chargement dans WebView2 sur le serveur Windows
+        continue-on-error: true # Certains runners ne fournissent pas de bureau graphique.
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'windows-deliverables/Massify-qrcode-Admin.exe').Path
+          $p = Start-Process -FilePath $exe -ArgumentList '--webview-test' -PassThru
+          if (-not $p.WaitForExit(65000)) { Stop-Process -Id $p.Id -Force; throw 'Test WebView2 expiré' }
+          if ($p.ExitCode -ne 0) {
+            $log = Join-Path $env:TEMP 'massify-webview-test-error.txt'
+            if (Test-Path $log) { Get-Content $log }
+            throw "Test WebView2 non réussi : $($p.ExitCode)"
+          }
+          Write-Host 'WebView2 : interface locale chargée avec succès.'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: massify-qrcode-admin-windows
+          path: |
+            windows-deliverables/Massify-qrcode-Admin.exe
+            windows-deliverables/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30

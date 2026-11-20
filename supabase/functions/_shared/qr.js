@@ -143,9 +143,11 @@ function escapeXml(value) {
 }
 
 /** Generate the authenticated SVG and, when applicable, the actual logo size. */
-export function renderQr(raw, { preview = false } = {}) {
+export function renderQr(raw, { preview = false, payloadOverride = '' } = {}) {
   const snapshot = normalizeSnapshot(raw, { enforceContrast: !preview });
-  const payload = preview ? 'https://example.com/qr-studio-preview' : snapshot.payload;
+  // payloadOverride is supplied only by the server for its own revocable link.
+  if (payloadOverride && (typeof payloadOverride !== 'string' || !/^https:\/\//i.test(payloadOverride))) throw new Error('Lien QR invalide.');
+  const payload = preview ? 'https://example.com/qr-studio-preview' : (payloadOverride || snapshot.payload);
   const { style } = snapshot;
   let qr = QRCode.create(payload, { errorCorrectionLevel: 'H' });
   let logoSizeApplied = null;

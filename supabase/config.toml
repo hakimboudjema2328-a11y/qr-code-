@@ -17,3 +17,7 @@ verify_jwt = false
 verify_jwt = true
 [functions.qr-client-qr]
 verify_jwt = true
+# L'ouverture d'un QR est publique : UUID aléatoire, contenu chiffré et statut
+# vérifié à chaque requête ; la passerelle ne doit pas exiger de session.
+[functions.qr-resolve]
+verify_jwt = false

@@ -1,7 +1,7 @@
 name: Construire l’APK administrateur
 on:
   push:
-    branches: [main, karidz-reconstruction]
+    branches: [main]
     paths:
       - 'android/**'
       - 'admin-app/web/**'
@@ -38,7 +38,11 @@ jobs:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
           PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL || 'https://massify-qrcode.pages.dev' }}
-        run: bash android/prepare_assets.sh
+        run: |
+          test -n "$SUPABASE_URL" && test -n "$SUPABASE_ANON_KEY"
+          bash android/prepare_assets.sh
+          grep -q 'delete-client-button' android/admin/src/main/assets/www/index.html
+          grep -q 'extend-client-button' android/admin/src/main/assets/www/index.html
       - name: Construire l’APK de test
         run: gradle --project-dir android :admin:assembleDebug --stacktrace
       - name: Vérifier si la signature de production est configurée
@@ -72,15 +76,16 @@ jobs:
           unzip -l "$APK" | grep -q 'assets/www/supabase-config.js'
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$APK"
           mkdir -p deliverables
-          cp "$APK" deliverables/QR-Studio-Admin-debug.apk
+          cp "$APK" deliverables/Massify-qrcode-Admin-debug.apk
           if [ -f android/admin/build/outputs/apk/release/admin-release.apk ]; then
             "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify android/admin/build/outputs/apk/release/admin-release.apk
-            cp android/admin/build/outputs/apk/release/admin-release.apk deliverables/QR-Studio-Admin-release.apk
-            cp android/admin/build/outputs/bundle/release/admin-release.aab deliverables/QR-Studio-Admin-release.aab
+            cp android/admin/build/outputs/apk/release/admin-release.apk deliverables/Massify-qrcode-Admin-release.apk
+            cp android/admin/build/outputs/bundle/release/admin-release.aab deliverables/Massify-qrcode-Admin-release.aab
           fi
           sha256sum deliverables/* > deliverables/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: qr-studio-admin-${{ github.run_attempt }}
+          name: massify-qrcode-admin-android
           path: deliverables/
-          retention-days: 14
+          if-no-files-found: error
+          retention-days: 30

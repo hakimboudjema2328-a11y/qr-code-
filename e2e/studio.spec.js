@@ -9,17 +9,18 @@ const aid='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',cid='bbbbbbbb-bbbb-4bbb-8bbb-bb
 const encode=x=>Buffer.from(JSON.stringify(x)).toString('base64url');
 function session(id,metadata={}){const user={id,aud:'authenticated',role:'authenticated',email:'not-visible@example.invalid',email_confirmed_at:'2026-01-01',app_metadata:metadata};return {access_token:encode({alg:'HS256',typ:'JWT'})+'.'+encode({sub:id,session_id:sid,app_metadata:metadata,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})+'.c2lnbmF0dXJl',refresh_token:'mock-refresh-'+id,expires_in:3600,token_type:'bearer',user}}
 const adminSession=session(aid),clientSession=session(cid,{qr_access_version:ver});
-function actualQr(draft){
- const script=`import {renderQr} from './supabase/functions/_shared/qr.js';const draft=await new Response(Deno.stdin.readable).json();console.log(JSON.stringify(renderQr(draft)));`;
- return JSON.parse(execFileSync(path.join(process.cwd(),'node_modules/.bin/deno'),['eval',script],{input:JSON.stringify(draft),encoding:'utf8',maxBuffer:5_000_000}));
+function actualQr(draft,payloadOverride=''){
+ const script=`import {renderQr} from './supabase/functions/_shared/qr.js';const {draft,payloadOverride}=await new Response(Deno.stdin.readable).json();console.log(JSON.stringify(renderQr(draft,{payloadOverride})));`;
+ return JSON.parse(execFileSync(path.join(process.cwd(),'node_modules/.bin/deno'),['eval',script],{input:JSON.stringify({draft,payloadOverride}),encoding:'utf8',maxBuffer:5_000_000}));
 }
-async function mockSupabase(page,{withPlan=true,expired=false,withQr=false,withRealQr=false,legacyWebp=false}={}){
- const snapshots=new Map(),calls=[],plans=withPlan?[{id:planId,name:'Formule Test',description:'Une formule de démonstration',price_dzd:1250,duration_days:30,is_active:true,position:0,created_at:'2026-01-01'}]:[],clients=[{user_id:cid,client_name:'Client Exemple',phone:'+213 555 00 00 00',plan_id:planId,plan_name:'Formule Test',expires_at:expired?'2024-01-01T00:00:00Z':null,is_active:true,created_at:'2026-01-01'}],qrs=withQr?[{id:qrId,user_id:cid,title:'Ancien QR',qr_type:'url',created_at:'2026-01-01'}]:[];
+async function mockSupabase(page,{withPlan=true,expired=false,withQr=false,withRealQr=false,legacyWebp=false,qrLimit=null,dynamicQr=false,extraQrs=0,realDynamic=false}={}){
+ const snapshots=new Map(),calls=[],plans=withPlan?[{id:planId,name:'Formule Test',description:'Une formule de démonstration',price_dzd:1250,duration_days:30,is_active:true,position:0,created_at:'2026-01-01'}]:[],clients=[{user_id:cid,client_name:'Client Exemple',phone:'+213 555 00 00 00',plan_id:planId,plan_name:'Formule Test',expires_at:expired?'2024-01-01T00:00:00Z':null,is_active:true,qr_limit:qrLimit,created_at:'2026-01-01'}],qrs=withQr?[{id:qrId,user_id:cid,title:'Ancien QR',qr_type:'url',is_dynamic:dynamicQr,scan_count:3,created_at:'2026-01-01'}]:[];
+ for(let i=0;i<extraQrs;i++)qrs.push({id:'10000000-0000-4000-8000-'+String(i).padStart(12,'0'),user_id:cid,title:'QR '+i,qr_type:'text',is_dynamic:false,scan_count:0,created_at:'2026-01-01'});
  if(legacyWebp){const logo='data:image/webp;base64,'+fs.readFileSync('e2e/fixtures/logo.webp').toString('base64');snapshots.set(qrId,{type:'url',content:{url:'https://example.com/ancien-webp'},style:{foreground:'#24203f',background:'#ffffff',dots:'rounded',corner:'rounded',frame:true,label:'SCANNEZ-MOI',logo}})}
  await page.route('**/supabase-config.js',route=>route.fulfill({contentType:'application/javascript',body:"window.QR_CONFIG={supabaseUrl:'https://mock.supabase.co',supabaseAnonKey:'public-example',publicSiteUrl:'https://qr.example'};"}));
  await page.route('https://mock.supabase.co/**',async route=>{
   const req=route.request(),u=new URL(req.url()),method=req.method(),raw=req.postData();let sent;try{sent=raw?JSON.parse(raw):null}catch{sent=null}calls.push({url:u.pathname,method,body:sent,query:u.search});
-  const headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'GET,POST,PATCH,OPTIONS','Content-Type':'application/json'};if(method==='OPTIONS')return route.fulfill({status:204,headers,body:''});let body={};
+  const headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'GET,HEAD,POST,PATCH,OPTIONS','Access-Control-Expose-Headers':'Content-Range','Content-Type':'application/json'};if(method==='OPTIONS')return route.fulfill({status:204,headers,body:''});let body={};
   if(u.pathname==='/auth/v1/user'){const bearer=req.headers().authorization||'';body=bearer.includes(adminSession.access_token)?adminSession.user:clientSession.user}
   else if(u.pathname==='/auth/v1/token')body=clientSession;
   else if(u.pathname==='/auth/v1/recover'||u.pathname==='/auth/v1/logout')body={};
@@ -30,16 +31,27 @@ async function mockSupabase(page,{withPlan=true,expired=false,withQr=false,withR
   else if(u.pathname==='/rest/v1/qr_studio_plans'&&method==='GET')body=u.searchParams.has('is_active')?plans.filter(p=>p.is_active):plans;
   else if(u.pathname==='/rest/v1/qr_studio_plans'&&method==='POST'){let p=Array.isArray(sent)?sent[0]:sent;plans.unshift({id:'11111111-1111-4111-8111-111111111111',position:0,created_at:'2026-01-01',...p});body=[{id:plans[0].id}]}
   else if(u.pathname==='/rest/v1/qr_studio_plans'&&method==='PATCH'){const id=(u.searchParams.get('id')||'').replace('eq.',''),p=plans.find(x=>x.id===id);if(p)Object.assign(p,sent);body=p?[{id}]:[]}
-  else if(u.pathname==='/rest/v1/qr_studio_clients'&&method==='GET')body=clients;
+  else if(u.pathname==='/rest/v1/qr_studio_clients'&&method==='GET')body=clients.map(c=>({...c,qr_studio_client_qrs:[{count:qrs.filter(q=>q.user_id===c.user_id).length}]}));
   else if(u.pathname==='/rest/v1/qr_studio_clients'&&method==='PATCH'){const id=(u.searchParams.get('user_id')||'').replace('eq.',''),c=clients.find(x=>x.user_id===id);if(c)Object.assign(c,sent);body=c?[{user_id:id}]:[]}
-  else if(u.pathname==='/rest/v1/qr_studio_client_qrs')body=qrs;
+  else if(u.pathname==='/rest/v1/qr_studio_client_qrs'&&method==='HEAD')return route.fulfill({status:200,headers:{...headers,'Content-Range':'*/'+qrs.length},body:''});
+  else if(u.pathname==='/rest/v1/qr_studio_client_qrs'){const offset=Number(u.searchParams.get('offset')||0),limit=Number(u.searchParams.get('limit')||qrs.length);body=qrs.slice(offset,offset+limit)}
   else if(u.pathname==='/functions/v1/qr-admin-auth')body={access_token:adminSession.access_token,refresh_token:adminSession.refresh_token};
   else if(u.pathname==='/functions/v1/qr-client-auth')body={access_token:clientSession.access_token,refresh_token:clientSession.refresh_token};
-  else if(u.pathname==='/functions/v1/qr-client-admin'){const newId='22222222-2222-4222-8222-222222222222';clients.unshift({user_id:newId,client_name:sent.client_name||'Client Exemple',phone:sent.phone||'',plan_id:sent.plan_id||null,plan_name:'',expires_at:sent.expires_at||null,is_active:true,created_at:'2026-01-02'});body={user_id:newId,client_name:sent.client_name||'Client Exemple',code:'9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N'}}
+  else if(u.pathname==='/functions/v1/qr-client-admin'){
+    if(sent.action==='create'){const newId='22222222-2222-4222-8222-222222222222';clients.unshift({user_id:newId,client_name:sent.client_name||'Client Exemple',phone:sent.phone||'',plan_id:sent.plan_id||null,plan_name:'',expires_at:sent.expires_at||null,qr_limit:sent.qr_limit??null,is_active:true,created_at:'2026-01-02'});body={user_id:newId,client_name:sent.client_name||'Client Exemple',code:'9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N'}}
+    else if(sent.action==='extend'){const c=clients.find(x=>x.user_id===sent.user_id);if(c)c.expires_at='2031-01-01T00:00:00Z';body={user_id:sent.user_id,expires_at:c?.expires_at}}
+    else if(sent.action==='delete'){const i=clients.findIndex(x=>x.user_id===sent.user_id);if(i>=0)clients.splice(i,1);body={user_id:sent.user_id,deleted:true}}
+    else body={user_id:sent.user_id,client_name:'Client Exemple',code:'9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N'}
+  }
   else if(u.pathname==='/functions/v1/qr-client-qr'){
-    if(sent.action==='create'){snapshots.set(sent.id,sent.draft);qrs.unshift({id:sent.id,user_id:cid,title:sent.title||'Lien web',qr_type:sent.draft.type,created_at:'2026-01-01'})}
+    if(sent.action==='delete'){const i=qrs.findIndex(q=>q.id===sent.id);if(i>=0)qrs.splice(i,1);snapshots.delete(sent.id);return route.fulfill({status:200,headers,body:JSON.stringify({id:sent.id,deleted:true})})}
+    if(sent.action==='create'){
+      if(qrLimit!==null&&qrs.length>=qrLimit)return route.fulfill({status:409,headers,body:JSON.stringify({error:'Votre limite de QR est atteinte.'})});
+      snapshots.set(sent.id,sent.draft);qrs.unshift({id:sent.id,user_id:cid,title:sent.title||'Lien web',qr_type:sent.draft.type,is_dynamic:['url','whatsapp'].includes(sent.draft.type),scan_count:0,created_at:'2026-01-01'})
+    }
     const example={type:'url',content:{url:'https://example.com/ancien'},style:{foreground:'#24203f',background:'#ffffff',dots:'rounded',corner:'rounded',frame:true,label:'SCANNEZ-MOI',logo:''}};
-    const rendered=withRealQr?actualQr(snapshots.get(sent.id)||example):{svg:'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/></svg>'};
+    const dynamic=realDynamic&&qrs.find(q=>q.id===sent.id)?.is_dynamic;
+    const rendered=withRealQr?actualQr(snapshots.get(sent.id)||example,dynamic?'https://qr.example/r/'+sent.id:''):{svg:'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/></svg>'};
     body={id:sent.id,...rendered}
   }
   else return route.fulfill({status:404,headers,body:'{}'});
@@ -234,4 +246,51 @@ test('lecture de logos petits et grands sur plusieurs contenus et styles',async(
   const r=new Resvg(qr[i].svg,{fitTo:{mode:'width',value:900}}),im=r.render();
   try{expect(decoded({width:im.width,height:im.height,data:new Uint8ClampedArray(im.pixels)}),`${drafts[i].type}, taille ${drafts[i].style.logoSize}, style ${drafts[i].style.dots}`).toBe(qr[i].payload)}finally{im.free();r.free()}
  }
+});
+
+test('thèmes clair et sombre, palettes QR et mouvement réduit',async({page})=>{
+ await page.emulateMedia({reducedMotion:'reduce'});await page.goto('/');
+ await page.locator('#theme-toggle').click();await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+ await page.reload();await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+ await page.locator('[data-preset=ocean]').click();await expect(page.locator('#fg')).toHaveValue('#103d67');await expect(page.locator('[data-preset=ocean]')).toHaveAttribute('aria-pressed','true');
+ await page.locator('#theme-toggle').click();await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
+ for(const width of [320,375,414,800]){await page.setViewportSize({width,height:812});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`site largeur ${width}`).toBe(true)}
+ await page.goto('/admin/');await page.locator('#login-view [data-theme-switch]').click();await expect(page.locator('html')).toHaveAttribute('data-theme','light');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+});
+
+test('quota : supprimer un QR désactivable libère une place',async({page})=>{
+ const {calls,qrs}=await mockSupabase(page,{withQr:true,dynamicQr:true,qrLimit:1});await page.goto('/');await page.locator('.head-actions .account-label').click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();
+ await expect(page.locator('#welcome-quota')).toContainText('1 QR enregistré sur 1 autorisé');await expect(page.locator('#generate-button')).toBeDisabled();await expect(page.locator('#generate-button')).toHaveText('Limite de QR atteinte');
+ await page.locator('nav[data-client-only] button[data-nav-view=orders]').click();await expect(page.getByText('Lien désactivable',{exact:true})).toBeVisible();await expect(page.getByText(/3 ouverture\(s\) estimée\(s\)/)).toBeVisible();
+ let warning='';page.once('dialog',async d=>{warning=d.message();await d.accept()});await page.getByRole('button',{name:'Supprimer',exact:true}).click();await expect(page.locator('#order-message')).toContainText('Une place est libérée');expect(warning).toContain('cessera immédiatement');expect(qrs).toHaveLength(0);expect(calls.some(c=>c.url==='/functions/v1/qr-client-qr'&&c.body.action==='delete'&&c.body.id===qrId)).toBe(true);
+ await page.getByRole('button',{name:'← Retour à la création'}).click();await expect(page.locator('#generate-button')).toBeEnabled();await expect(page.locator('#welcome-quota')).toContainText('0 QR enregistrés sur 1 autorisé');
+});
+
+test('suppression d’un QR natif avertit que les copies restent utilisables, même après expiration',async({page})=>{
+ const {qrs}=await mockSupabase(page,{expired:true,withQr:true,qrLimit:1});await page.goto('/');await page.locator('.head-actions .account-label').click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();await page.locator('nav[data-client-only] button[data-nav-view=orders]').click();
+ let warning='';page.once('dialog',async d=>{warning=d.message();await d.accept()});await page.getByRole('button',{name:'Supprimer',exact:true}).click();await expect(page.locator('#order-message')).toContainText('Une place est libérée');expect(warning).toContain('restera utilisable');expect(qrs).toHaveLength(0);
+ await page.getByRole('button',{name:'← Retour à la création'}).click();await expect(page.locator('#generate-button')).toBeDisabled();await expect(page.locator('#generate-button')).toHaveText('Abonnement expiré');
+});
+
+test('historique paginé : tous les QR enregistrés restent accessibles au-delà de 50',async({page})=>{
+ await mockSupabase(page,{extraQrs:105,qrLimit:110});await page.goto('/');await page.locator('.head-actions .account-label').click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();await page.locator('nav[data-client-only] button[data-nav-view=orders]').click();
+ await expect(page.locator('.order-card')).toHaveCount(50);await expect(page.locator('#account-quota')).toContainText('105');await page.locator('#orders-more').click();await expect(page.locator('.order-card')).toHaveCount(100);await page.locator('#orders-more').click();await expect(page.locator('.order-card')).toHaveCount(105);await expect(page.locator('#orders-more')).toBeHidden();
+});
+
+test('administration : quota, prolongation et suppression avec double confirmation',async({page})=>{
+ const {calls,clients}=await mockSupabase(page,{qrLimit:3});await page.goto('/admin/');await page.locator('#password').fill('mot-de-passe-exemple');await page.locator('#login-button').click();await page.locator('.sidebar [data-view=clients]').click();
+ await expect(page.locator('#client-rows')).toContainText('0 / 3');await page.locator('#client-rows [data-edit-client]').first().click();await expect(page.locator('#edit-client-limit')).toHaveValue('3');await page.locator('#edit-client-limit').fill('8');await page.locator('#save-client-button').click();await expect(page.locator('#edit-alert')).toContainText('Client mis à jour');expect(clients[0].qr_limit).toBe(8);
+ await page.locator('#extend-client-days').fill('45');await page.locator('#extend-client-button').click();await expect(page.locator('#edit-alert')).toContainText('Accès prolongé');expect(calls.find(x=>x.url==='/functions/v1/qr-client-admin'&&x.body.action==='extend').body.days).toBe(45);
+ const dialogs=[];page.on('dialog',async d=>{dialogs.push(d.type());await d.accept(d.type()==='prompt'?'SUPPRIMER':undefined)});await page.locator('#delete-client-button').click();await expect(page.locator('#app-error')).toContainText('Client supprimé');expect(dialogs).toEqual(['confirm','prompt']);expect(clients).toHaveLength(0);expect(calls.some(x=>x.url==='/functions/v1/qr-client-admin'&&x.body.action==='delete')).toBe(true);
+});
+
+test('nouveau QR Web : le fichier téléchargé encode bien le lien révocable',async({page})=>{
+ test.setTimeout(60000);const {calls}=await mockSupabase(page,{withRealQr:true,realDynamic:true});await page.goto('/');await page.locator('.head-actions .account-label').click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();await page.locator('[data-key=url]').fill('https://example.com/destination-privee');await page.locator('#qr-title').fill('Nouveau lien');await page.locator('#generate-button').click();
+ const card=page.locator('.order-card').filter({has:page.getByRole('heading',{name:'Nouveau lien'})});await expect(card).toBeVisible();await expect(card).toContainText('Lien désactivable');const png=readQrPixels((await downloaded(card.getByRole('button',{name:'PNG ↓'}))).bytes),created=calls.find(c=>c.url==='/functions/v1/qr-client-qr'&&c.body.action==='create');expect(decoded(png)).toBe('https://qr.example/r/'+created.body.id);expect(decoded(png)).not.toBe('https://example.com/destination-privee');
+});
+
+test('le dossier publié ne contient pas l’interface administrateur',async()=>{
+ execFileSync('bash',['scripts/prepare-web.sh'],{env:{...process.env,SUPABASE_URL:'https://mock.supabase.co',SUPABASE_ANON_KEY:'public-example',PUBLIC_SITE_URL:'https://massify-qrcode.pages.dev'}});
+ expect(fs.existsSync('.output/public/admin')).toBe(false);expect(fs.existsSync('.output/public/404.html')).toBe(true);
+ expect(fs.readFileSync('.output/public/index.html','utf8')).not.toContain('href="/admin/"');expect(fs.readFileSync('.output/public/_redirects','utf8')).toContain('/r/* https://mock.supabase.co/functions/v1/qr-resolve/:splat 302');
 });

@@ -20,6 +20,11 @@ function cleanExpiry(value) {
   if (date.getUTCFullYear()<2000 || date.getUTCFullYear()>2200) throw new AppError(400,'Date de fin invalide.');
   return date.toISOString();
 }
+function cleanLimit(value) {
+  if (value === null || value === '' || value === undefined) return null;
+  if (!Number.isInteger(value) || value < 0 || value > 100000) throw new AppError(400,'La limite de QR doit être un entier entre 0 et 100 000, ou vide pour un accès illimité.');
+  return value;
+}
 async function cancelAllSessions(env,email,code) {
   const {session}=await passwordSession(env,email,normalizeCode(code));
   if (!session?.access_token) throw new AppError(503,'Renouvellement du code impossible pour le moment.');
@@ -31,10 +36,10 @@ async function cancelAllSessions(env,email,code) {
 export async function clientAdminHandler(request,env) {
   return userEndpoint(request,env,async()=>{
     if (!dbReady(env)) throw new AppError(503,'Service administrateur indisponible.');
-    await requireAdministrator(request,env);
+    const administrator=await requireAdministrator(request,env);
     const body=await readJson(request,4096);
     if (body.action==='create') {
-      const client_name=cleanName(body.client_name),phone=cleanPhone(body.phone),expires_at=cleanExpiry(body.expires_at);
+      const client_name=cleanName(body.client_name),phone=cleanPhone(body.phone),expires_at=cleanExpiry(body.expires_at),qr_limit=cleanLimit(body.qr_limit);
       let plan_id=null,plan_name='';
       if (body.plan_id) {
         if (!isUuid(body.plan_id)) throw new AppError(400,'Abonnement invalide.');
@@ -47,12 +52,36 @@ export async function clientAdminHandler(request,env) {
       try {
         user=await authAdmin(env,'users','POST',{email,password:normalizeCode(code),email_confirm:true,app_metadata:{qr_access_version:version}});
         if (!isUuid(user?.id)) throw new AppError(503,'Création du compte impossible.');
-        await database(env,'qr_studio_clients',{method:'POST',headers:{Prefer:'return=minimal'},body:{user_id:user.id,client_name,phone,plan_id,plan_name,expires_at,access_version:version}});
+        await database(env,'qr_studio_clients',{method:'POST',headers:{Prefer:'return=minimal'},body:{user_id:user.id,client_name,phone,plan_id,plan_name,expires_at,qr_limit,access_version:version}});
       } catch(e) {
         if (isUuid(user?.id)) {try {await authAdmin(env,`users/${user.id}`,'DELETE')} catch { /* Le compte orphelin ne dispose d'aucun accès. */ }}
         throw e;
       }
       return json({user_id:user.id,client_name,code});
+    }
+    if (body.action==='extend') {
+      if (!isUuid(body.user_id)) throw new AppError(400,'Client invalide.');
+      if (!Number.isInteger(body.days) || body.days<1 || body.days>36500) throw new AppError(400,'Indiquez entre 1 et 36 500 jours.');
+      const rows=await database(env,'rpc/qr_extend_client',{method:'POST',body:{p_user_id:body.user_id,p_days:body.days}});
+      const result=rows?.[0];
+      if (result?.status==='not_found') throw new AppError(404,'Client introuvable.');
+      if (result?.status==='unlimited') throw new AppError(409,'Cet accès est déjà sans date de fin.');
+      if (result?.status!=='ok') throw new AppError(503,'Prolongation temporairement indisponible.');
+      return json({user_id:body.user_id,expires_at:result.expires_at});
+    }
+    if (body.action==='delete') {
+      const id=body.user_id;
+      if (!isUuid(id) || id===administrator.id) throw new AppError(400,'Client invalide.');
+      // Ne jamais supprimer un administrateur, même si son identifiant a aussi une ligne client.
+      const admins=await database(env,`qr_studio_admins?user_id=eq.${id}&select=user_id`);
+      if (admins?.length) throw new AppError(403,'Un compte administrateur ne peut pas être supprimé ici.');
+      // Première étape volontairement irréversible : coupe les sessions et les liens même si
+      // le service Auth échoue ensuite. L'administrateur pourra réessayer la suppression.
+      const stopped=await database(env,`qr_studio_clients?user_id=eq.${id}&select=user_id`,{method:'PATCH',headers:{Prefer:'return=representation'},body:{is_active:false,updated_at:new Date().toISOString()}});
+      if (!stopped?.length) throw new AppError(404,'Client introuvable.');
+      try { await authAdmin(env,`users/${id}`,'DELETE'); }
+      catch { throw new AppError(503,'Client désactivé, mais suppression incomplète. Réessayez ; ses liens QR désactivables sont coupés.'); }
+      return json({user_id:id,deleted:true});
     }
     if (body.action==='reset_code') {
       if (!isUuid(body.user_id)) throw new AppError(400,'Client invalide.');

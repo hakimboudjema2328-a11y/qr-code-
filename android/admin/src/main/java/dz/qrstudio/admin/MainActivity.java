@@ -1,6 +1,7 @@
 package dz.qrstudio.admin;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
@@ -8,11 +9,15 @@ import android.os.Bundle;
 import android.print.PrintManager;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
+import android.webkit.JsPromptResult;
+import android.webkit.JsResult;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.EditText;
 import android.widget.Toast;
 import androidx.webkit.WebViewAssetLoader;
 import java.io.OutputStream;
@@ -43,6 +48,32 @@ public final class MainActivity extends Activity {
         WebView.setWebContentsDebuggingEnabled(false);
         WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
+        // Android WebView ne présente pas toujours les confirmations JavaScript par défaut.
+        // Les dialogues natifs permettent notamment de confirmer une suppression irréversible.
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onJsAlert(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this).setTitle("Massify-qrcode").setMessage(message)
+                    .setPositiveButton("OK", (d, w) -> result.confirm())
+                    .setOnCancelListener(d -> result.cancel()).show();
+                return true;
+            }
+            @Override public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this).setTitle("Massify-qrcode").setMessage(message)
+                    .setPositiveButton("Confirmer", (d, w) -> result.confirm())
+                    .setNegativeButton("Annuler", (d, w) -> result.cancel())
+                    .setOnCancelListener(d -> result.cancel()).show();
+                return true;
+            }
+            @Override public boolean onJsPrompt(WebView view, String url, String message, String value, JsPromptResult result) {
+                EditText input = new EditText(MainActivity.this);
+                input.setSingleLine(true); input.setText(value == null ? "" : value);
+                new AlertDialog.Builder(MainActivity.this).setTitle("Confirmation").setMessage(message).setView(input)
+                    .setPositiveButton("Confirmer", (d, w) -> result.confirm(input.getText().toString()))
+                    .setNegativeButton("Annuler", (d, w) -> result.cancel())
+                    .setOnCancelListener(d -> result.cancel()).show();
+                return true;
+            }
+        });
         webView.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 return assets.shouldInterceptRequest(request.getUrl());

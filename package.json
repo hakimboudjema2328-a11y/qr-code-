@@ -2,8 +2,8 @@
   "name": "qr-studio",
   "private": true,
   "type": "module",
-  "version": "3.0.0",
-  "description": "Massify-qrcode : sites statiques PWA, Supabase et APK WebView embarquée",
+  "version": "4.0.0",
+  "description": "Massify-qrcode : site client, Supabase et administration embarquée Windows et Android",
   "scripts": {
     "test": "deno test --allow-env --allow-net=registry.npmjs.org tests/*.test.js",
     "test:browser": "playwright test",

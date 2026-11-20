@@ -8,6 +8,9 @@ playwright-report/
 android/*/src/main/assets/
 android/.gradle/
 android/**/build/
+windows/**/bin/
+windows/**/obj/
+windows/Admin/www.zip
 *.keystore
 *.jks
 *.apk

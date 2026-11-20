@@ -36,7 +36,7 @@ Deno.test('QR : accès au seul propriétaire, expiration bloquant seulement les 
   if(u.pathname.endsWith('/auth/v1/user'))return response({id:uid,email:'synthetic@example.invalid',email_confirmed_at:'2026'});
   if(u.pathname.endsWith('/qr_studio_clients'))return response(account?[{user_id:uid,client_name:'Client',plan_name:'',is_active:true,expires_at:null}]:[]);
   if(u.pathname.endsWith('/qr_studio_client_qrs'))return response(stored?[stored]:[]);
-  if(u.pathname.endsWith('/rpc/qr_create_client_qr')){if(expiry)return response('expired');stored={id:body.p_id,snapshot_ciphertext:body.p_ciphertext,snapshot_iv:body.p_iv};return response('ok')}
+  if(u.pathname.endsWith('/rpc/qr_create_client_qr_v2')){if(expiry)return response('expired');stored={id:body.p_id,is_dynamic:body.p_dynamic,snapshot_ciphertext:body.p_ciphertext,snapshot_iv:body.p_iv};return response('ok')}
   throw Error('unexpected '+u.pathname)};
  try{let r=await clientQrHandler(req({action:'create',id:qrId,title:'Ma page',draft:clientDraft}),env);assert.equal(r.status,200);let result=await r.json();assert.match(result.svg,/^<svg/);assert.ok(!stored.snapshot_ciphertext.includes('example.com'));expiry=true;r=await clientQrHandler(req({action:'export',id:qrId}),env);assert.equal(r.status,200);assert.match((await r.json()).svg,/^<svg/);stored=null;r=await clientQrHandler(req({action:'create',id:qrId,draft:clientDraft}),env);assert.equal(r.status,403);assert.match((await r.json()).error,/expiré/);account=false;r=await clientQrHandler(req({action:'export',id:qrId}),env);assert.equal(r.status,403);account=true;r=await clientQrHandler(req({action:'export',id:qrId},jwt(adminId)),env);assert.equal(r.status,403)}finally{globalThis.fetch=orig}
 });
@@ -62,7 +62,7 @@ Deno.test('taille du logo enregistrée dans le QR chiffré et conservée à l’
   if(u.pathname.endsWith('/auth/v1/user'))return response({id:uid,email:'synthetic@example.invalid',email_confirmed_at:'2026'});
   if(u.pathname.endsWith('/qr_studio_clients'))return response([{user_id:uid,client_name:'Client',plan_name:'',is_active:true,expires_at:null}]);
   if(u.pathname.endsWith('/qr_studio_client_qrs'))return response(stored?[stored]:[]);
-  if(u.pathname.endsWith('/rpc/qr_create_client_qr')){if(expired)return response('expired');stored={id:body.p_id,snapshot_ciphertext:body.p_ciphertext,snapshot_iv:body.p_iv};return response('ok')}
+  if(u.pathname.endsWith('/rpc/qr_create_client_qr_v2')){if(expired)return response('expired');stored={id:body.p_id,is_dynamic:body.p_dynamic,snapshot_ciphertext:body.p_ciphertext,snapshot_iv:body.p_iv};return response('ok')}
   throw Error('unexpected '+u.pathname)};
  try{
   const draft={...clientDraft,style:{...DEFAULT_STYLE,logo:'data:image/png;base64,AAAA',logoSize:22}};
