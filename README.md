@@ -65,6 +65,8 @@ npx wrangler pages deploy .output/public --project-name VOTRE_PROJET --branch ma
 
 Le workflow GitHub de déploiement est désactivé tant que la variable `CLOUDFLARE_PAGES_PROJECT` et les secrets Cloudflare requis ne sont pas configurés. Un envoi sur GitHub ne publie donc pas automatiquement le site en l’absence de ces réglages.
 
+Pour conserver les anciens liens après le changement de domaine, le dossier `legacy-redirect/` peut être publié uniquement sur l’ancien projet Pages : il redirige vers `massify-qrcode.pages.dev` en conservant les chemins et les paramètres. Ne pas le publier sur le nouveau projet. Les sessions du navigateur étant liées au domaine, les clients et administrateurs peuvent devoir se reconnecter sur la nouvelle adresse ; les comptes et QR enregistrés ne sont pas modifiés.
+
 ## APK administrateur
 
 Le workflow `build-apk.yml` copie `admin-app/web` dans les assets Android, injecte uniquement la configuration publique depuis les variables GitHub, puis construit et vérifie l’APK. L’application utilise `WebViewAssetLoader`, une connexion HTTPS à Supabase et ouvre les liens externes dans le navigateur.
