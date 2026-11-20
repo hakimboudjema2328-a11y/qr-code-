@@ -84,4 +84,8 @@ python3 -m http.server 5173 --directory .output/public
 
 L’aperçu de l’éditeur encode un contenu d’exemple, pas les données réelles. Le QR final est généré sur le serveur après contrôle de la session et de la date de fin. Testez le scan avec les couleurs et le logo choisis.
 
+Après connexion par code, le client arrive dans son espace personnel : création, QR enregistrés, abonnement et déconnexion. Une session restaurée conserve cet affichage ; un abonnement expiré bloque seulement les nouvelles créations.
+
+Les logos PNG, JPG et WebP jusqu’à 5 Mo (6 000 pixels de côté et 24 mégapixels au maximum) sont réduits localement avant l’enregistrement. L’export PNG 1 800 px est calculé localement sans lecture de canvas, pour rester utilisable lorsque le navigateur protège l’extraction de canvas. Les conversions utilisent les copies locales de resvg 2.6.2 (MPL-2.0) et jSquash PNG 3.1.1 / WebP 1.5.0 (Apache-2.0), avec leurs licences dans `site-public/web/vendor/`. Le premier chargement de ces composants nécessite une connexion ; l’export SVG reste proposé si le PNG échoue. Testez toujours les QR sur de vrais téléphones avant impression.
+
 Les codes clients sont des secrets aléatoires longs, équivalents à des mots de passe : ne pas les publier. Supabase applique des politiques RLS, un contrôle des sessions et une limitation des tentatives ; le contenu des QR enregistrés est chiffré. Une revue de sécurité indépendante et des essais sur appareils restent recommandés.

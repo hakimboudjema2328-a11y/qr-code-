@@ -4,3 +4,12 @@
   X-Frame-Options: DENY
   Permissions-Policy: camera=(), microphone=(), geolocation=()
   Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/qr-raster.js
+  Cache-Control: no-cache
+/sw.js
+  Cache-Control: no-cache

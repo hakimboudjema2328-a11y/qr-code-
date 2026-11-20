@@ -10,9 +10,13 @@
     "check": "bash scripts/check.sh && npm test"
   },
   "devDependencies": {
+    "@jsquash/png": "3.1.1",
+    "@jsquash/webp": "1.5.0",
     "@playwright/test": "1.65.0",
+    "@resvg/resvg-wasm": "2.6.2",
     "deno": "2.9.6",
     "jsqr": "^1.4.0",
+    "pngjs": "5.0.0",
     "qrcode": "1.5.4"
   }
 }

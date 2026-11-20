@@ -1,14 +1,20 @@
 import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const aid='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',cid='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',planId='cccccccc-cccc-4ccc-8ccc-cccccccccccc',ver='dddddddd-dddd-4ddd-8ddd-dddddddddddd',sid='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',qrId='ffffffff-ffff-4fff-8fff-ffffffffffff';
 const encode=x=>Buffer.from(JSON.stringify(x)).toString('base64url');
 function session(id,metadata={}){const user={id,aud:'authenticated',role:'authenticated',email:'not-visible@example.invalid',email_confirmed_at:'2026-01-01',app_metadata:metadata};return {access_token:encode({alg:'HS256',typ:'JWT'})+'.'+encode({sub:id,session_id:sid,app_metadata:metadata,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})+'.c2lnbmF0dXJl',refresh_token:'mock-refresh-'+id,expires_in:3600,token_type:'bearer',user}}
 const adminSession=session(aid),clientSession=session(cid,{qr_access_version:ver});
-async function mockSupabase(page,{withPlan=true,expired=false,withQr=false}={}){
- const calls=[],plans=withPlan?[{id:planId,name:'Formule Test',description:'Une formule de démonstration',price_dzd:1250,duration_days:30,is_active:true,position:0,created_at:'2026-01-01'}]:[],clients=[{user_id:cid,client_name:'Client Exemple',phone:'+213 555 00 00 00',plan_id:planId,plan_name:'Formule Test',expires_at:expired?'2024-01-01T00:00:00Z':null,is_active:true,created_at:'2026-01-01'}],qrs=withQr?[{id:qrId,user_id:cid,title:'Ancien QR',qr_type:'url',created_at:'2026-01-01'}]:[];
+function actualSvg(draft){
+ const script=`import {renderSvg} from './supabase/functions/_shared/qr.js';const draft=await new Response(Deno.stdin.readable).json();console.log(renderSvg(draft));`;
+ return execFileSync(path.join(process.cwd(),'node_modules/.bin/deno'),['eval',script],{input:JSON.stringify(draft),encoding:'utf8',maxBuffer:5_000_000}).trim();
+}
+async function mockSupabase(page,{withPlan=true,expired=false,withQr=false,withRealQr=false,legacyWebp=false}={}){
+ const snapshots=new Map(),calls=[],plans=withPlan?[{id:planId,name:'Formule Test',description:'Une formule de démonstration',price_dzd:1250,duration_days:30,is_active:true,position:0,created_at:'2026-01-01'}]:[],clients=[{user_id:cid,client_name:'Client Exemple',phone:'+213 555 00 00 00',plan_id:planId,plan_name:'Formule Test',expires_at:expired?'2024-01-01T00:00:00Z':null,is_active:true,created_at:'2026-01-01'}],qrs=withQr?[{id:qrId,user_id:cid,title:'Ancien QR',qr_type:'url',created_at:'2026-01-01'}]:[];
+ if(legacyWebp){const logo='data:image/webp;base64,'+fs.readFileSync('e2e/fixtures/logo.webp').toString('base64');snapshots.set(qrId,{type:'url',content:{url:'https://example.com/ancien-webp'},style:{foreground:'#24203f',background:'#ffffff',dots:'rounded',corner:'rounded',frame:true,label:'SCANNEZ-MOI',logo}})}
  await page.route('**/supabase-config.js',route=>route.fulfill({contentType:'application/javascript',body:"window.QR_CONFIG={supabaseUrl:'https://mock.supabase.co',supabaseAnonKey:'public-example',publicSiteUrl:'https://qr.example'};"}));
  await page.route('https://mock.supabase.co/**',async route=>{
   const req=route.request(),u=new URL(req.url()),method=req.method(),raw=req.postData();let sent;try{sent=raw?JSON.parse(raw):null}catch{sent=null}calls.push({url:u.pathname,method,body:sent,query:u.search});
@@ -29,7 +35,11 @@ async function mockSupabase(page,{withPlan=true,expired=false,withQr=false}={}){
   else if(u.pathname==='/functions/v1/qr-admin-auth')body={access_token:adminSession.access_token,refresh_token:adminSession.refresh_token};
   else if(u.pathname==='/functions/v1/qr-client-auth')body={access_token:clientSession.access_token,refresh_token:clientSession.refresh_token};
   else if(u.pathname==='/functions/v1/qr-client-admin'){const newId='22222222-2222-4222-8222-222222222222';clients.unshift({user_id:newId,client_name:sent.client_name||'Client Exemple',phone:sent.phone||'',plan_id:sent.plan_id||null,plan_name:'',expires_at:sent.expires_at||null,is_active:true,created_at:'2026-01-02'});body={user_id:newId,client_name:sent.client_name||'Client Exemple',code:'9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N'}}
-  else if(u.pathname==='/functions/v1/qr-client-qr'){if(sent.action==='create'){qrs.unshift({id:sent.id,user_id:cid,title:sent.title||'Lien web',qr_type:sent.draft.type,created_at:'2026-01-01'})}body={id:sent.id,svg:'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/></svg>'}}
+  else if(u.pathname==='/functions/v1/qr-client-qr'){
+    if(sent.action==='create'){snapshots.set(sent.id,sent.draft);qrs.unshift({id:sent.id,user_id:cid,title:sent.title||'Lien web',qr_type:sent.draft.type,created_at:'2026-01-01'})}
+    const example={type:'url',content:{url:'https://example.com/ancien'},style:{foreground:'#24203f',background:'#ffffff',dots:'rounded',corner:'rounded',frame:true,label:'SCANNEZ-MOI',logo:''}};
+    body={id:sent.id,svg:withRealQr?actualSvg(snapshots.get(sent.id)||example):'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/></svg>'}
+  }
   else return route.fulfill({status:404,headers,body:'{}'});
   return route.fulfill({status:200,headers,body:JSON.stringify(body)});
  });return {calls,plans,clients,qrs};
@@ -65,4 +75,89 @@ test('les neuf styles SVG se décodent vers le contenu créé',async({page})=>{
  const script=`import { DEFAULT_STYLE,renderSvg } from './supabase/functions/_shared/qr.js'; const all=[];for(const dots of ['square','rounded','dots'])for(const corner of ['square','rounded','circle'])all.push(renderSvg({type:'url',content:{url:'https://example.com/scan-me'},style:{...DEFAULT_STYLE,dots,corner}}));console.log(JSON.stringify(all));`;
  const svgList=JSON.parse(execFileSync(path.join(process.cwd(),'node_modules/.bin/deno'),['eval',script],{encoding:'utf8'}));await page.goto('/');await page.addScriptTag({path:require.resolve('jsqr/dist/jsQR.js')});
  for(const svg of svgList){const decoded=await page.evaluate(async s=>{const blob=new Blob([s],{type:'image/svg+xml'}),url=URL.createObjectURL(blob);try{const img=new Image();await new Promise((ok,no)=>{img.onload=ok;img.onerror=no;img.src=url});const c=document.createElement('canvas');c.width=800;c.height=800;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,800,800);ctx.drawImage(img,0,0,800,800);const pixels=ctx.getImageData(0,0,800,800);return window.jsQR(pixels.data,800,800)?.data||''}finally{URL.revokeObjectURL(url)}},svg);expect(decoded).toBe('https://example.com/scan-me')}
+});
+
+test('espace personnel : accueil privé, abonnement, historique, rechargement et déconnexion',async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));await mockSupabase(page,{withQr:true});
+ await page.goto('/');await expect(page.locator('#haut')).toBeVisible();await expect(page.locator('#abonnements')).toBeVisible();
+ await page.locator('.head-actions .account-label').click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();
+ await expect(page.locator('#welcome-name')).toHaveText('Bonjour, Client Exemple.');await expect(page.locator('#creer')).toBeVisible();
+ for(const selector of ['#haut','#abonnements','#comment','#request-form','nav[data-public-only]'])await expect(page.locator(selector)).toBeHidden();
+ await page.reload();await expect(page.locator('#welcome-name')).toHaveText('Bonjour, Client Exemple.');await expect(page.locator('#haut')).toBeHidden();await expect(page.locator('#abonnements')).toBeHidden();
+ await page.locator('nav[data-client-only] button[data-nav-view=subscription]').click();await expect(page.locator('#subscription-page')).toBeVisible();await expect(page.locator('#subscription-plan')).toHaveText('Formule Test');await expect(page.locator('#subscription-expiry')).toHaveText('Sans date de fin');
+ await page.locator('nav[data-client-only] button[data-nav-view=orders]').click();await expect(page.getByRole('heading',{name:'Ancien QR'})).toBeVisible();
+ await page.getByRole('button',{name:'← Retour à la création'}).click();await page.locator('[data-key=url]').fill('https://example.com/prive');
+ page.once('dialog',d=>d.accept());await page.locator('.head-actions .account-label').click();await expect(page.locator('#haut')).toBeVisible();await expect(page.locator('#abonnements')).toBeVisible();await expect(page.locator('[data-key=url]')).toHaveValue('https://');await expect(page.locator('#client-welcome')).toBeHidden();expect(errors).toEqual([]);
+});
+
+test('espace client mobile : menus personnels, absence du marketing et pas de débordement',async({page})=>{
+ await page.setViewportSize({width:375,height:812});await mockSupabase(page,{withQr:true});await page.goto('/');
+ await page.getByRole('button',{name:'Ouvrir le menu'}).click();await page.locator('#mobile-menu .account-label').click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();
+ await expect(page.locator('#welcome-name')).toHaveText('Bonjour, Client Exemple.');await expect(page.locator('#abonnements')).toBeHidden();await expect(page.locator('#request-form')).toBeHidden();
+ await page.getByRole('button',{name:'Ouvrir le menu'}).click();await page.locator('#mobile-menu button[data-client-only]').filter({hasText:'Mes QR codes'}).click();await expect(page.getByRole('heading',{name:'Ancien QR'})).toBeVisible();
+ await page.getByRole('button',{name:'Ouvrir le menu'}).click();await page.locator('#mobile-menu button[data-client-only]').filter({hasText:'Mon abonnement'}).click();await expect(page.locator('#subscription-page')).toBeVisible();
+ for(const width of [320,375,414,800]){await page.setViewportSize({width,height:812});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`largeur ${width}`).toBe(true)}
+ await page.reload();await expect(page.locator('#welcome-name')).toHaveText('Bonjour, Client Exemple.');await expect(page.locator('#haut')).toBeHidden();
+});
+
+const PNG=require('pngjs').PNG,jsQR=require('jsqr');
+function readQrPixels(bytes){const png=PNG.sync.read(bytes);return {width:png.width,height:png.height,data:new Uint8ClampedArray(png.data)}}
+function decoded(pixels){
+ let {width,height,data}=pixels;
+ // Camera previews naturally sample a large download down to the sensor size.
+ if(width>900){const w=900,h=Math.round(height*w/width),out=new Uint8ClampedArray(w*h*4);for(let y=0;y<h;y++)for(let x=0;x<w;x++){const a=(Math.floor(y*height/h)*width+Math.floor(x*width/w))*4,b=(y*w+x)*4;out.set(data.subarray(a,a+4),b)}width=w;height=h;data=out}
+ return jsQR(data,width,height)?.data||'';
+}
+function hasRedLogo(pixels){let red=0;const x0=Math.floor(pixels.width*.43),x1=Math.floor(pixels.width*.57),y0=Math.floor(pixels.width*.43),y1=Math.floor(pixels.width*.57);for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){const i=(y*pixels.width+x)*4;if(pixels.data[i]>150&&pixels.data[i+1]<80&&pixels.data[i+2]<120&&pixels.data[i+3]>200)red++}return red>100}
+async function downloaded(button){const promise=button.page().waitForEvent('download');await button.click();const file=await promise;return {name:file.suggestedFilename(),bytes:fs.readFileSync(await file.path())}}
+
+test('vrais SVG et PNG : sans logo et avec logos PNG, JPG et WebP, même si canvas est bloqué',async({page})=>{
+ test.setTimeout(120000);
+ const {initWasm,Resvg}=await import('@resvg/resvg-wasm');await initWasm(fs.readFileSync('node_modules/@resvg/resvg-wasm/index_bg.wasm'));
+ await page.addInitScript(()=>{
+   HTMLCanvasElement.prototype.toBlob=function(){throw new Error('Extraction canvas bloquée')};
+   HTMLCanvasElement.prototype.toDataURL=function(){throw new Error('Extraction canvas bloquée')};
+   CanvasRenderingContext2D.prototype.getImageData=function(){throw new Error('Extraction canvas bloquée')};
+ });
+ const {calls}=await mockSupabase(page,{withRealQr:true});await page.goto('/');await page.locator('.head-actions .account-label').click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();await expect(page.locator('#welcome-name')).toContainText('Client Exemple');
+ for(const type of ['sans-logo','png','jpg','webp']){
+   const target='https://example.com/scan-'+type,title='Test '+type;
+   await page.locator('[data-key=url]').fill(target);await page.locator('#qr-title').fill(title);
+   if(type!=='sans-logo'){await page.locator('#logo').setInputFiles(path.join(process.cwd(),'e2e/fixtures/logo.'+type));await expect(page.locator('#logo-status')).toHaveText('Logo prêt.',{timeout:30000})}
+   await page.locator('#generate-button').click();const card=page.locator('.order-card').filter({has:page.getByRole('heading',{name:title,exact:true})});await expect(card).toBeVisible({timeout:30000});
+   const png=await downloaded(card.getByRole('button',{name:'PNG ↓'}));expect(png.name).toMatch(/\.png$/);const pixels=readQrPixels(png.bytes);expect(pixels.width).toBe(1800);expect(pixels.height).toBeGreaterThan(1800);expect(decoded(pixels),type+' PNG').toBe(target);if(type!=='sans-logo')expect(hasRedLogo(pixels),type+' logo PNG').toBe(true);
+   const svg=await downloaded(card.getByRole('button',{name:'SVG ↓'}));expect(svg.name).toMatch(/\.svg$/);const svgText=svg.bytes.toString('utf8');if(type!=='sans-logo')expect(svgText).toContain('data:image/png;base64,');
+   const renderer=new Resvg(svgText,{fitTo:{mode:'width',value:900}}),image=renderer.render();try{const pix={width:image.width,height:image.height,data:new Uint8ClampedArray(image.pixels)};expect(decoded(pix),type+' SVG').toBe(target);if(type!=='sans-logo')expect(hasRedLogo(pix),type+' logo SVG').toBe(true)}finally{image.free();renderer.free()}
+   await page.getByRole('button',{name:'← Retour à la création'}).click();
+ }
+ const creations=calls.filter(c=>c.url==='/functions/v1/qr-client-qr'&&c.body.action==='create');expect(creations).toHaveLength(4);for(const c of creations.slice(1)){expect(c.body.draft.style.logo).toMatch(/^data:image\/png;base64,/);expect(c.body.draft.style.logo.length).toBeLessThanOrEqual(270000)}
+});
+
+test('logos invalides et trop volumineux : erreurs utiles, sans lancement de création',async({page})=>{
+ await mockSupabase(page);await page.goto('/');
+ await page.locator('#logo').setInputFiles({name:'image.svg',mimeType:'image/svg+xml',buffer:Buffer.from('<svg/>')});await expect(page.locator('#logo-status')).toContainText('Format non reconnu');
+ await page.locator('#logo').setInputFiles({name:'gros.png',mimeType:'image/png',buffer:Buffer.alloc(5*1024*1024+1)});await expect(page.locator('#logo-status')).toContainText('5 Mo maximum');
+});
+
+test('mobile : création et téléchargement PNG avec logo WebP',async({page})=>{
+ test.setTimeout(60000);await page.setViewportSize({width:375,height:812});await mockSupabase(page,{withRealQr:true});await page.goto('/');
+ await page.getByRole('button',{name:'Ouvrir le menu'}).click();await page.locator('#mobile-menu .account-label').click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();
+ await expect(page.locator('#welcome-name')).toContainText('Client Exemple');await page.locator('[data-key=url]').fill('https://example.com/mobile-logo');await page.locator('#logo').setInputFiles('e2e/fixtures/logo.webp');await expect(page.locator('#logo-status')).toHaveText('Logo prêt.',{timeout:30000});await page.locator('#qr-title').fill('Mobile avec logo');await page.locator('#generate-button').click();
+ const card=page.locator('.order-card').filter({has:page.getByRole('heading',{name:'Mobile avec logo'})});await expect(card).toBeVisible();const png=await downloaded(card.getByRole('button',{name:'PNG ↓'}));const pixels=readQrPixels(png.bytes);expect(decoded(pixels)).toBe('https://example.com/mobile-logo');expect(hasRedLogo(pixels)).toBe(true);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test('accès expiré : export PNG et SVG des anciens logos WebP, création toujours bloquée',async({page})=>{
+ test.setTimeout(60000);const {calls}=await mockSupabase(page,{expired:true,withQr:true,withRealQr:true,legacyWebp:true});await page.goto('/');await page.locator('.head-actions .account-label').click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();
+ await expect(page.locator('#welcome-expiry')).toContainText('expiré');await expect(page.locator('#generate-button')).toBeDisabled();await expect(page.locator('#abonnements')).toBeHidden();
+ await page.locator('nav[data-client-only] button[data-nav-view=orders]').click();await expect(page.getByRole('heading',{name:'Ancien QR'})).toBeVisible();
+ const card=page.locator('.order-card').filter({has:page.getByRole('heading',{name:'Ancien QR'})});const svg=await downloaded(card.getByRole('button',{name:'SVG ↓'}));expect(svg.bytes.toString('utf8')).toContain('data:image/png;base64,');
+ const png=await downloaded(card.getByRole('button',{name:'PNG ↓'}));const pixels=readQrPixels(png.bytes);expect(decoded(pixels)).toBe('https://example.com/ancien-webp');expect(hasRedLogo(pixels)).toBe(true);expect(calls.filter(c=>c.url==='/functions/v1/qr-client-qr'&&c.body.action==='create')).toHaveLength(0);
+ await page.reload();await expect(page.locator('#welcome-expiry')).toContainText('expiré');await expect(page.locator('#generate-button')).toBeDisabled();
+});
+
+test('logo JPEG issu du téléphone : orientation EXIF respectée',async({page})=>{
+ const {calls}=await mockSupabase(page);await page.goto('/');await page.locator('.head-actions .account-label').click();await page.locator('#auth-code').fill('9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9NZ8-9N');await page.locator('#auth-submit').click();await expect(page.locator('#welcome-name')).toContainText('Client Exemple');
+ await page.locator('[data-key=url]').fill('https://example.com/orientation');await page.locator('#logo').setInputFiles('e2e/fixtures/logo-oriente.jpg');await expect(page.locator('#logo-status')).toHaveText('Logo prêt.');await page.locator('#generate-button').click();await expect(page.locator('#orders-page')).toBeVisible();
+ const logo=calls.find(c=>c.url==='/functions/v1/qr-client-qr'&&c.body.action==='create').body.draft.style.logo;const image=readQrPixels(Buffer.from(logo.split(',')[1],'base64'));
+ const pixel=(x,y)=>Array.from(image.data.subarray((y*image.width+x)*4,(y*image.width+x)*4+4));const top=pixel(96,40),bottom=pixel(96,150);expect(top[0]).toBeGreaterThan(180);expect(top[2]).toBeLessThan(80);expect(bottom[2]).toBeGreaterThan(180);expect(bottom[0]).toBeLessThan(80);
 });
