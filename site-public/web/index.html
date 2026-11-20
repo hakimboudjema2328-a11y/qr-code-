@@ -151,12 +151,12 @@ async function loadClient(){
   const userId=state.session.user.id;
   const [account,usage]=await Promise.all([
     state.client.from('qr_studio_clients').select('client_name,plan_name,expires_at,is_active,qr_limit').eq('user_id',userId).maybeSingle(),
-    state.client.from('qr_studio_client_qrs').select('id',{count:'exact',head:true}).eq('user_id',userId)
+    state.client.rpc('qr_client_qr_usage')
   ]);
   if(account.error)throw Error('Impossible de vérifier votre accès. Réessayez.');
   if(!state.session||state.session.user.id!==userId)return;
   if(!account.data||!account.data.is_active){await state.client.auth.signOut({scope:'local'});throw Error('Accès désactivé ou session terminée. Contactez-nous.')}
-  state.clientInfo={...account.data,qr_used:!usage.error&&Number.isInteger(usage.count)?usage.count:null};clientAlert('');updateAccount();
+  state.clientInfo={...account.data,qr_used:!usage.error&&Number.isInteger(usage.data)?usage.data:null};clientAlert('');updateAccount();
 }
 $('auth-form').addEventListener('submit',async e=>{
   e.preventDefault();if(!state.client){authAlert('La connexion n’est pas encore configurée.');return}

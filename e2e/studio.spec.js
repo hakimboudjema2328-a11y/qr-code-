@@ -26,6 +26,8 @@ async function mockSupabase(page,{withPlan=true,expired=false,withQr=false,withR
   else if(u.pathname==='/auth/v1/recover'||u.pathname==='/auth/v1/logout')body={};
   else if(u.pathname==='/rest/v1/rpc/qr_is_admin')body=true;
   else if(u.pathname==='/rest/v1/rpc/qr_admin_overview')body=[{clients_total:clients.length,clients_active:expired?0:clients.length,qr_total:qrs.length,plans_active:plans.filter(x=>x.is_active).length}];
+  else if(u.pathname==='/rest/v1/rpc/qr_client_qr_usage')body=qrs.filter(q=>q.user_id===cid).length;
+  else if(u.pathname==='/rest/v1/rpc/qr_admin_client_usage')body=clients.map(c=>({user_id:c.user_id,qr_count:qrs.filter(q=>q.user_id===c.user_id).length}));
   else if(u.pathname==='/rest/v1/qr_studio_settings'&&method==='GET')body={announcement:'',whatsapp_number:'213799888645',instagram_url:'https://www.instagram.com/massify_services/',facebook_url:'https://www.facebook.com/profile.php?id=61594892763460&locale=fr_FR'};
   else if(u.pathname==='/rest/v1/qr_studio_settings'&&method==='PATCH')body=[{id:1}];
   else if(u.pathname==='/rest/v1/qr_studio_plans'&&method==='GET')body=u.searchParams.has('is_active')?plans.filter(p=>p.is_active):plans;
